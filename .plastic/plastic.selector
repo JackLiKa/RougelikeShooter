@@ -1,0 +1,4 @@
+repository "RoguelikeShoot_New@tj_jie040418@cloud.cn"
+  path "/"
+    br "/main"
+    co "/main"
