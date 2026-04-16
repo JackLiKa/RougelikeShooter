@@ -16,6 +16,10 @@ namespace MainMenuScene
             base.OnUpdate();
             m_uiController.GameUpdate();
         }
+        public void DrawGUI()
+        {
+            m_uiController?.DrawGUI();
+        }
 
 
     }

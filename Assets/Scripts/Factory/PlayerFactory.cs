@@ -1,14 +1,9 @@
-using System;
 using UnityEngine;
-using System.Collections.Generic;
-using System;
-using TMPro;
-using UnityEngine.UI;
 
 public enum PlayerType
 {
     Player1,
-    // Player2,
+    Player2,
     // Player3,
     // Player4,
 }
@@ -36,6 +31,9 @@ public class PlayerFactory
         {
             case PlayerType.Player1:
                 player=new Player1(obj);
+                break;
+            case PlayerType.Player2:
+                player=new Player2(obj);
                 break;
             default:
                 return null;

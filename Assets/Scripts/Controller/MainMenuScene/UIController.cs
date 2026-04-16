@@ -20,5 +20,9 @@ namespace MainMenuScene
             base.AlwaysUpdate();
             rootPanel.GameUpdate();
         }
+        public void DrawGUI()
+        {
+            rootPanel?.DrawGUI();
+        }
     }
 }

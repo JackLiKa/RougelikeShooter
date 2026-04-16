@@ -22,6 +22,7 @@ public class Player1RunState:IPlayerState
     protected override void OnEnter()
     {
         base.OnEnter();
+        moveSpeed = PlayerRuntimeStats.GetMoveSpeed(gameObject, moveSpeed);
         // Debug.Log(this);
         // myRigidbody=transform.GetComponent<Rigidbody2D>();
         // myAnimator=transform.GetComponent<Animator>();

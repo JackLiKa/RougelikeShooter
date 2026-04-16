@@ -1,29 +1,152 @@
-using System.Collections.Generic;
-// using UnityEngine;
-using System.Linq;
-using System;
-using UnityEngine.UI;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
-
-
-public class PanelRoot:IPanel
+public class PanelRoot : IPanel
 {
-    
-    public PanelRoot():base(null)
+    private bool showExitConfirm;
+    private Rect dialogRect;
+
+    public PanelRoot() : base(null)
     {
     }
 
     protected override void OnInit()
     {
-        base.OnInit();
-        UnityTool.Instance.GetComponentFromChildren<Button>(gameObject,"ButtonStart").onClick.AddListener(()=>{
-            // GameMediator.Instance.SendNotification(NotificationNames.StartGame);
-            Debug.Log("æ¸¸æˆå¼€å§‹");
-        });
+        /*
+         * [AI_COMMENTED_OUT]
+         * Ô­ÊµÏÖ³¢ÊÔÔÚ MainMenu ³¡¾°Àï²éÕÒ ButtonStart ²¢Ö±½Ó¸ø Unity Button °óÊÂ¼þ£¬
+         * µ«µ±Ç° MainMenuScene Êµ¼Ê²¢Ã»ÓÐÕâ×é Button ×é¼þ£¬Ö÷²Ëµ¥Ô­ÓÐ¿ÉÓÃÂß¼­À´×Ô MainMenuButtons.OnGUI¡£
+         * ÏÖÔÚ°´ÄãµÄÒªÇóÍ³Ò»Ç¨ÒÆµ½ MainMenuGameLoop -> Facade -> UIController -> PanelRoot ÕâÌõÁ´£¬
+         * Òò´ËÕâÀï±£Áô¾ÉË¼Â·ËµÃ÷£¬Êµ¼Ê¸ÄÎª³õÊ¼»¯ GameLoop Çý¶¯µÄ IMGUI Ãæ°å¡£
+         */
+        gameObject = GameObject.Find("MainMenu");
+        rectTransform = gameObject != null ? gameObject.GetComponent<RectTransform>() : null;
+        dialogRect = new Rect(Screen.width / 2 - 150, Screen.height / 2 - 75, 300, 150);
     }
+
     protected override void OnEnter()
     {
         base.OnEnter();
+    }
+
+    protected override void OnUpdate()
+    {
+        base.OnUpdate();
+
+        if (Input.GetKeyDown(KeyCode.Escape))
+        {
+            showExitConfirm = true;
+        }
+    }
+
+    public void DrawGUI()
+    {
+        GUILayout.Space(50);
+
+        GUILayout.BeginHorizontal();
+        GUILayout.Space(100);
+        if (GUILayout.Button("¿ªÊ¼ÓÎÏ·", GUILayout.Height(40), GUILayout.Width(100)))
+        {
+            SceneManager.LoadScene("GameScene");
+        }
+        GUILayout.EndHorizontal();
+
+        GUILayout.Space(20);
+        GUILayout.BeginHorizontal();
+        GUILayout.Space(100);
+        if (GUILayout.Button("½ÇÉ«Ãæ°å", GUILayout.Height(40), GUILayout.Width(100)))
+        {
+            SceneManager.LoadScene("CharacterPanelScene");
+        }
+        GUILayout.EndHorizontal();
+
+        GUILayout.Space(20);
+        GUILayout.BeginHorizontal();
+        GUILayout.Space(100);
+        if (GUILayout.Button("ÍË³öÓÎÏ·", GUILayout.Height(40), GUILayout.Width(100)))
+        {
+            showExitConfirm = true;
+        }
+        GUILayout.EndHorizontal();
+
+        GUILayout.Space(20);
+        GUILayout.BeginHorizontal();
+        GUILayout.Space(100);
+        GUILayout.Label(
+            $"µ±Ç°½ÇÉ«: {GameSelectionConfig.GetPlayerDisplayName(GameSelectionConfig.CurrentPlayerType)}    µ±Ç°ÎäÆ÷: {GameSelectionConfig.GetWeaponDisplayName(GameSelectionConfig.CurrentWeaponType)}",
+            GUILayout.Width(420),
+            GUILayout.Height(30));
+        GUILayout.EndHorizontal();
+
+        if (showExitConfirm)
+        {
+            DrawExitDialog();
+        }
+    }
+
+    private void DrawExitDialog()
+    {
+        Color dialogBackgroundColor = new Color(0.2f, 0.6f, 0.9f, 1f);
+        GUI.color = dialogBackgroundColor;
+        GUI.DrawTexture(dialogRect, Texture2D.whiteTexture);
+        GUI.color = Color.white;
+
+        Color borderColor = new Color(0.1f, 0.4f, 0.7f, 1f);
+        GUI.color = borderColor;
+        GUI.DrawTexture(new Rect(dialogRect.x - 2, dialogRect.y - 2, dialogRect.width + 4, dialogRect.height + 4), Texture2D.whiteTexture);
+        GUI.color = Color.white;
+
+        GUIStyle titleStyle = new GUIStyle(GUI.skin.label)
+        {
+            alignment = TextAnchor.MiddleCenter,
+            fontSize = 18,
+            fontStyle = FontStyle.Bold
+        };
+        titleStyle.normal.textColor = Color.black;
+
+        GUIStyle messageStyle = new GUIStyle(GUI.skin.label)
+        {
+            alignment = TextAnchor.MiddleCenter,
+            fontSize = 14
+        };
+        messageStyle.normal.textColor = Color.black;
+
+        GUI.Label(new Rect(dialogRect.x + 10, dialogRect.y + 10, 280, 30), "È·ÈÏÍË³ö", titleStyle);
+        GUI.Label(new Rect(dialogRect.x + 10, dialogRect.y + 40, 280, 30), "È·¶¨ÒªÍË³öÓÎÏ·Âð£¿", messageStyle);
+
+        Color confirmButtonColor = new Color(1f, 0.6f, 0.2f, 1f);
+        Color cancelButtonColor = new Color(0.4f, 0.8f, 0.4f, 1f);
+
+        GUIStyle buttonStyle = new GUIStyle(GUI.skin.button)
+        {
+            fontSize = 14,
+            fontStyle = FontStyle.Bold
+        };
+        buttonStyle.normal.textColor = Color.black;
+        buttonStyle.hover.textColor = Color.white;
+
+        GUI.backgroundColor = confirmButtonColor;
+        if (GUI.Button(new Rect(dialogRect.x + 30, dialogRect.y + 80, 100, 40), "È·¶¨", buttonStyle))
+        {
+            showExitConfirm = false;
+            ExitGame();
+        }
+
+        GUI.backgroundColor = cancelButtonColor;
+        if (GUI.Button(new Rect(dialogRect.x + 170, dialogRect.y + 80, 100, 40), "È¡Ïû", buttonStyle))
+        {
+            showExitConfirm = false;
+        }
+
+        GUI.backgroundColor = Color.white;
+    }
+
+    private void ExitGame()
+    {
+#if UNITY_EDITOR
+        UnityEditor.EditorApplication.isPlaying = false;
+#else
+        Application.Quit();
+#endif
     }
 }
