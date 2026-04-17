@@ -28,4 +28,9 @@ public abstract class IPlayerState:IState
         Debug.Log(this);
     }
 
+    protected bool CanReadPlayerInput()
+    {
+        return RoguelikeGameManager.Instance == null || RoguelikeGameManager.Instance.CanAcceptPlayerInput;
+    }
+
 }

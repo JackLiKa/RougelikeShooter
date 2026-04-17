@@ -41,6 +41,13 @@ public class Player1RunState:IPlayerState
 
 
     void Move(){    
+        if (!CanReadPlayerInput())
+        {
+            m_Machine.SetState<Player1IdleState>();
+            return;
+        }
+
+        moveSpeed = PlayerRuntimeStats.GetMoveSpeed(gameObject, moveSpeed);
         hor=Input.GetAxis("Horizontal");
         ver=Input.GetAxis("Vertical");
         moveDir.Set(hor,ver,0f);

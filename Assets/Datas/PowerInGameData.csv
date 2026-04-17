@@ -1,0 +1,12 @@
+CardKey,Title,Description,Weight,MaxStacks,BonusHp,BonusAttack,BonusMoveSpeed,BonusShootRate,BonusBulletSpeed,BonusProjectileCount,BonusVolleyCount,BonusBurstCount,BonusPierce,BonusPickupRadius,BonusHealOnPickup
+hp_boost,钢铁之心,最大生命值 +25,10,5,25,0,0,0,0,0,0,0,0,0,0
+attack_boost,重装弹头,攻击力 +4,10,5,0,4,0,0,0,0,0,0,0,0,0
+speed_boost,疾风战靴,移动速度 +1.2,8,4,0,0,1.2,0,0,0,0,0,0,0,0
+rapid_trigger,高速扳机,射速 +0.6/秒,9,6,0,0,0,0.6,0,0,0,0,0,0,0
+bullet_speed,高能弹道,子弹速度 +5,7,4,0,0,0,0,5,0,0,0,0,0,0
+multishot,扩容散射,额外扇形子弹 +1,4,2,0,0,0,0,0,1,0,0,0,0,0
+volley,子弹齐射,每层额外增加 1 路扇形齐射,5,2,0,0,0,0,0,0,1,0,0,0,0
+burst_fire,子弹连射,每层额外增加 1 轮连射,5,2,0,0,0,0,0,0,0,1,0,0,0
+pierce,破甲穿透,穿透 +1,4,3,0,0,0,0,0,0,0,0,1,0,0
+magnet,磁能核心,拾取范围 +1.5,6,3,0,0,0,0,0,0,0,0,0,1.5,0
+field_medic,战地医者,拾取时回复 3 点生命,5,3,0,0,0,0,0,0,0,0,0,0,3

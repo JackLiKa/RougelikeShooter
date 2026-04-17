@@ -1,0 +1,11 @@
+WaveIndex,EnemyKey,SpawnCount,SpawnInterval,EliteEnemyKey,EliteCount
+1,Enemy1,6,2.4,DireEnemy1,0
+2,Enemy1,8,2.1,DireEnemy1,0
+3,Enemy1,10,1.9,DireEnemy1,0
+4,Enemy1,12,1.6,DireEnemy1,0
+5,Enemy1,14,1.4,DireEnemy1,1
+6,Enemy1,16,1.3,DireEnemy1,0
+7,Enemy1,18,1.2,DireEnemy1,0
+8,Enemy1,20,1.1,DireEnemy1,0
+9,Enemy1,22,1.0,DireEnemy1,0
+10,Enemy1,24,0.9,DireEnemy1,1

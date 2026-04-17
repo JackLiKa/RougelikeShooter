@@ -31,6 +31,11 @@ public class Player2IdleState : IPlayerState
 
     private void Move()
     {
+        if (!CanReadPlayerInput())
+        {
+            return;
+        }
+
         hor = Input.GetAxis("Horizontal");
         ver = Input.GetAxis("Vertical");
         moveDir.Set(hor, ver, 0f);

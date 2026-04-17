@@ -1,0 +1,2 @@
+SaveSlot,AutoSaveSeconds,SnapshotInterval,SnapshotKeepCount,BinaryExtension
+slot0,20,12,6,bin

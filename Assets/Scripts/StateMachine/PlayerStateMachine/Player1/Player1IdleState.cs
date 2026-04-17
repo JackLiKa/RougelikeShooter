@@ -30,6 +30,11 @@ public class Player1IdleState:IPlayerState
     }
 
     void Move(){
+        if (!CanReadPlayerInput())
+        {
+            return;
+        }
+
         hor=Input.GetAxis("Horizontal");
         ver=Input.GetAxis("Vertical");
         moveDir.Set(hor,ver,0f);

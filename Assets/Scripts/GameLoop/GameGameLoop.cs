@@ -7,17 +7,13 @@ public class GameGameLoop:MonoBehaviour
     void Start()
     {
         EnsureFacade();
+        RoguelikeGameManager.EnsureExists(gameObject);
+        RoguelikeHudCanvas.EnsureExists(gameObject);
     }
     void Update()
     {
         EnsureFacade();
         facade.GameUpdate();
-    }
-
-    void OnGUI()
-    {
-        EnsureFacade();
-        facade.DrawGUI();
     }
 
     private void EnsureFacade()

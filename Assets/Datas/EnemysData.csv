@@ -1,0 +1,3 @@
+EnemyKey,DisplayName,TemplateName,IsElite,MaxHp,Attack,MoveSpeed,AttackInterval,ContactRange,ExperienceDrop,Scale,PoolSize
+Enemy1,史莱姆,Enemy1,false,40,6,3.5,0.9,1.1,12,8.5,48
+DireEnemy1,灾厄精英,DireEnemy1,true,180,16,5.8,0.7,1.35,0,12.5,18

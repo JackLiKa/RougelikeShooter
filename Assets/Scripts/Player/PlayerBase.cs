@@ -63,13 +63,6 @@ public class PlayerBase
         get=>m_isLeft;
         set
         {
-            if(value)
-            {
-                transform.rotation=Quaternion.Euler(0,0,180);
-            }else
-            {
-                transform.rotation=Quaternion.identity;
-            }
             m_isLeft=value;
         }
     }

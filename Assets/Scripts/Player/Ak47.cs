@@ -7,14 +7,17 @@ public class Ak47 : MonoBehaviour
     public Camera mainCamera;
 
     private Vector3 mousePosition;
-    private Vector2 gunDirection;
+    private Vector2 gunDirection = Vector2.right;
     private Transform playerTransform;
-    private bool isFlipped;
+    private SpriteRenderer spriteRenderer;
+    private Vector3 baseLocalScale;
     private float nextShootTime;
 
     void Start()
     {
         playerTransform = transform.parent;
+        spriteRenderer = GetComponent<SpriteRenderer>();
+        baseLocalScale = transform.localScale;
         RefreshCameraReference();
     }
 
@@ -25,24 +28,36 @@ public class Ak47 : MonoBehaviour
             playerTransform = transform.parent;
         }
 
+        if (baseLocalScale == Vector3.zero)
+        {
+            baseLocalScale = transform.localScale;
+        }
+
         RefreshCameraReference();
         UpdateDirection();
-        if (bullet == null || muzzleTransform == null)
+        TryShoot();
+    }
+
+    private void TryShoot()
+    {
+        RoguelikeGameManager manager = RoguelikeGameManager.Instance;
+        if (manager == null || !manager.CanAcceptPlayerInput || muzzleTransform == null)
         {
             return;
         }
 
-        float shootSpeed = PlayerRuntimeStats.GetShootSpeed(playerTransform != null ? playerTransform.gameObject : null, 1f);
-        float shootInterval = 1f / Mathf.Max(0.1f, shootSpeed);
-        if (!Input.GetMouseButton(0) || Time.time < nextShootTime)
+        float shootInterval = 1f / Mathf.Max(0.1f, manager.CurrentFireRate);
+        if (!Input.GetMouseButton(0) || Time.unscaledTime < nextShootTime)
         {
             return;
         }
 
-        nextShootTime = Time.time + shootInterval;
-        float bulletAngle = Mathf.Atan2(gunDirection.y, gunDirection.x) * Mathf.Rad2Deg;
-        Quaternion bulletRotation = Quaternion.Euler(0f, 0f, bulletAngle);
-        Instantiate(bullet, muzzleTransform.position, bulletRotation);
+        if (!manager.TryFireWeapon(muzzleTransform.position, gunDirection))
+        {
+            return;
+        }
+
+        nextShootTime = Time.unscaledTime + shootInterval;
     }
 
     private void UpdateDirection()
@@ -56,32 +71,21 @@ public class Ak47 : MonoBehaviour
         mousePosition.z = -mainCamera.transform.position.z;
         mousePosition = mainCamera.ScreenToWorldPoint(mousePosition);
 
-        gunDirection = (mousePosition - transform.position).normalized;
+        Vector3 aimOrigin = muzzleTransform != null ? muzzleTransform.position : transform.position;
+        gunDirection = ((Vector2)(mousePosition - aimOrigin)).normalized;
+        if (gunDirection.sqrMagnitude <= 0.001f)
+        {
+            gunDirection = Vector2.right;
+        }
+
         float angle = Mathf.Atan2(gunDirection.y, gunDirection.x) * Mathf.Rad2Deg;
-
-        if (playerTransform != null && playerTransform.localScale.x < 0f)
+        transform.rotation = Quaternion.Euler(0f, 0f, angle);
+        float parentMirrorCompensation = playerTransform != null && playerTransform.lossyScale.x < 0f ? -1f : 1f;
+        transform.localScale = new Vector3(Mathf.Abs(baseLocalScale.x) * parentMirrorCompensation, Mathf.Abs(baseLocalScale.y), baseLocalScale.z);
+        if (spriteRenderer != null)
         {
-            angle += 180f;
+            spriteRenderer.flipY = gunDirection.x < 0f;
         }
-
-        transform.eulerAngles = new Vector3(0f, 0f, angle);
-
-        if (playerTransform == null)
-        {
-            return;
-        }
-
-        bool playerFacingRight = playerTransform.localScale.x > 0f;
-        bool mouseOnRight = gunDirection.x > 0f;
-        bool shouldFlip = (playerFacingRight && !mouseOnRight) || (!playerFacingRight && mouseOnRight);
-        if (shouldFlip == isFlipped)
-        {
-            return;
-        }
-
-        float scaleY = shouldFlip ? -Mathf.Abs(transform.localScale.y) : Mathf.Abs(transform.localScale.y);
-        transform.localScale = new Vector3(transform.localScale.x, scaleY, transform.localScale.z);
-        isFlipped = shouldFlip;
     }
 
     private void RefreshCameraReference()

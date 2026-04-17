@@ -13,6 +13,13 @@ public class ItemSpawnData
     public TileBase tile;
 }
 
+public enum TerrainSurfaceType
+{
+    Ground = 0,
+    Grass = 1,
+    Water = 2
+}
+
 public class MapGenerator : MonoBehaviour
 {
 
@@ -210,6 +217,95 @@ public class MapGenerator : MonoBehaviour
 
     public bool IsGround(int x,int y){
         return mapData[x,y]>waterProbability;
+    }
+
+    public TerrainSurfaceType GetTerrainType(Vector3 worldPosition)
+    {
+        if (groundTilemap == null)
+        {
+            return TerrainSurfaceType.Ground;
+        }
+
+        Vector3Int cellPosition = groundTilemap.WorldToCell(worldPosition);
+        if (!IsInMapRange(cellPosition.x, cellPosition.y))
+        {
+            return TerrainSurfaceType.Ground;
+        }
+
+        if (!IsGround(cellPosition.x, cellPosition.y))
+        {
+            return TerrainSurfaceType.Water;
+        }
+
+        if (itemTilemap != null && itemTilemap.GetTile(cellPosition) != null)
+        {
+            return TerrainSurfaceType.Grass;
+        }
+
+        return TerrainSurfaceType.Ground;
+    }
+
+    public bool IsWaterAtWorldPosition(Vector3 worldPosition)
+    {
+        return GetTerrainType(worldPosition) == TerrainSurfaceType.Water;
+    }
+
+    public bool IsGrassAtWorldPosition(Vector3 worldPosition)
+    {
+        return GetTerrainType(worldPosition) == TerrainSurfaceType.Grass;
+    }
+
+    public Vector3 FindGrassSpawnPosition(Vector3 fallbackPosition)
+    {
+        if (groundTilemap == null || width <= 0 || height <= 0)
+        {
+            return fallbackPosition;
+        }
+
+        Vector3Int fallbackCell = groundTilemap.WorldToCell(fallbackPosition);
+        Vector3 bestGrassPosition = fallbackPosition;
+        float bestGrassDistance = float.MaxValue;
+        bool foundGrass = false;
+
+        Vector3 bestGroundPosition = fallbackPosition;
+        float bestGroundDistance = float.MaxValue;
+
+        for (int x = 0; x < width; x++)
+        {
+            for (int y = 0; y < height; y++)
+            {
+                if (!IsGround(x, y))
+                {
+                    continue;
+                }
+
+                Vector3Int cell = new Vector3Int(x, y, 0);
+                float distance = Vector2.SqrMagnitude(new Vector2(cell.x - fallbackCell.x, cell.y - fallbackCell.y));
+                Vector3 worldPosition = groundTilemap.GetCellCenterWorld(cell);
+
+                if (distance < bestGroundDistance)
+                {
+                    bestGroundDistance = distance;
+                    bestGroundPosition = worldPosition;
+                }
+
+                if (itemTilemap == null || itemTilemap.GetTile(cell) == null)
+                {
+                    continue;
+                }
+
+                if (distance >= bestGrassDistance)
+                {
+                    continue;
+                }
+
+                bestGrassDistance = distance;
+                bestGrassPosition = worldPosition;
+                foundGrass = true;
+            }
+        }
+
+        return foundGrass ? bestGrassPosition : bestGroundPosition;
     }
 
 

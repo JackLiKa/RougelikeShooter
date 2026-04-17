@@ -43,6 +43,7 @@ public static class GameSceneSelectionApplier
         runtimeStats.ApplyProfile(PlayerProfileRepository.GetProfile(playerType));
 
         AttachSelectedWeapon(selectedPlayerObject.transform, weaponType);
+        UpdateCameraTarget(selectedPlayerObject.transform);
 
         GameObject weaponsRoot = GameObject.Find("Weapons");
         if (weaponsRoot != null)
@@ -138,5 +139,14 @@ public static class GameSceneSelectionApplier
         }
 
         weapon.mainCamera = cachedMainCamera;
+    }
+
+    private static void UpdateCameraTarget(Transform playerTransform)
+    {
+        CameraFollow cameraFollow = Object.FindAnyObjectByType<CameraFollow>();
+        if (cameraFollow != null)
+        {
+            cameraFollow.target = playerTransform;
+        }
     }
 }

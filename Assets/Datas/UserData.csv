@@ -1,0 +1,2 @@
+StartingCoins,StartingLevel,StartingExp,BaseExpToLevel,ExpGrowthPerLevel,UpgradeCostBase,UpgradeCostGrowth,UpgradeStatPercent
+0,1,0,80,35,60,30,0.08

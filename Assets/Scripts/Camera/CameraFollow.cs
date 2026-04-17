@@ -19,11 +19,7 @@ public class CameraFollow : MonoBehaviour
     {
         if (target == null)
         {
-            GameObject player = GameObject.Find("Player");
-            if (player != null)
-            {
-                target = player.transform;
-            }
+            ResolveTarget();
         }
         
         // 相机尺寸设置：显示 10x10 个 Player 大小
@@ -43,6 +39,11 @@ public class CameraFollow : MonoBehaviour
     // LateUpdate is called after all Update functions have been called
     void LateUpdate()
     {
+        if (target == null || !target.gameObject.activeInHierarchy)
+        {
+            ResolveTarget();
+        }
+
         if (target != null)
         {
             // 获取相机半高（正交相机）
@@ -61,6 +62,25 @@ public class CameraFollow : MonoBehaviour
                 mapTop - cameraHalfHeight);
             
             transform.position = targetPosition;
+        }
+    }
+
+    private void ResolveTarget()
+    {
+        Transform playersRoot = GameObject.Find("Players")?.transform;
+        if (playersRoot == null)
+        {
+            return;
+        }
+
+        for (int index = 0; index < playersRoot.childCount; index++)
+        {
+            Transform player = playersRoot.GetChild(index);
+            if (player.gameObject.activeInHierarchy)
+            {
+                target = player;
+                return;
+            }
         }
     }
 }

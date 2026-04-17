@@ -1,0 +1,1474 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.SceneManagement;
+
+public sealed class RoguelikeGameManager : MonoBehaviour
+{
+    private sealed class ActiveWaveSpawn
+    {
+        public EnemyProfile Profile;
+        public int RemainingCount;
+        public float SpawnInterval;
+        public float Timer;
+        public bool IsElite;
+    }
+
+    private sealed class BulletHitInfo
+    {
+        public EnemyActor Enemy;
+        public float HitT;
+    }
+
+    public sealed class OwnedPowerCardInfo
+    {
+        public PowerCardData Card;
+        public int StackCount;
+    }
+
+    private sealed class SessionBonuses
+    {
+        public int BonusHp;
+        public int BonusAttack;
+        public float BonusMoveSpeed;
+        public float BonusShootRate;
+        public float BonusBulletSpeed;
+        public int BonusProjectileCount;
+        public int BonusVolleyCount;
+        public int BonusBurstCount;
+        public int BonusPierce;
+        public float BonusPickupRadius;
+        public int BonusHealOnPickup;
+
+        public void Clear()
+        {
+            BonusHp = 0;
+            BonusAttack = 0;
+            BonusMoveSpeed = 0f;
+            BonusShootRate = 0f;
+            BonusBulletSpeed = 0f;
+            BonusProjectileCount = 0;
+            BonusVolleyCount = 0;
+            BonusBurstCount = 0;
+            BonusPierce = 0;
+            BonusPickupRadius = 0f;
+            BonusHealOnPickup = 0;
+        }
+    }
+
+    public static RoguelikeGameManager Instance { get; private set; }
+
+    private readonly Dictionary<string, ComponentPool<EnemyActor>> enemyPools = new Dictionary<string, ComponentPool<EnemyActor>>(System.StringComparer.OrdinalIgnoreCase);
+    private readonly List<EnemyActor> activeEnemies = new List<EnemyActor>();
+    private readonly List<Bullet> activeBullets = new List<Bullet>();
+    private readonly List<ExperiencePickup> activePickups = new List<ExperiencePickup>();
+    private readonly List<FloatingDamageText> activeDamageTexts = new List<FloatingDamageText>();
+    private readonly List<ActiveWaveSpawn> activeWaveSpawns = new List<ActiveWaveSpawn>();
+    private readonly Dictionary<string, int> cardStacks = new Dictionary<string, int>(System.StringComparer.OrdinalIgnoreCase);
+    private readonly List<PowerCardData> currentCardChoices = new List<PowerCardData>();
+    private readonly List<OwnedPowerCardInfo> ownedPowerCards = new List<OwnedPowerCardInfo>();
+    private readonly SessionBonuses sessionBonuses = new SessionBonuses();
+
+    private InGameConfigData inGameConfig;
+    private MapConfigData mapConfig;
+    private SaveConfigData saveConfig;
+    private WeaponProfile weaponProfile;
+    private ComponentPool<Bullet> bulletPool;
+    private ComponentPool<ExperiencePickup> pickupPool;
+    private ComponentPool<FloatingDamageText> damageTextPool;
+    private Transform poolRoot;
+    private Transform bulletTemplate;
+    private Transform enemyTemplateRoot;
+    private Transform activePlayer;
+    private PlayerRuntimeStats playerStats;
+    private Ak47 activeWeapon;
+    private CameraFollow cameraFollow;
+    private MapGenerator mapGenerator;
+
+    private float elapsedTime;
+    private float nextSnapshotTimer;
+    private float nextAutoSaveTimer;
+    private float reloadRemaining;
+    private float activeSkillCooldownRemaining;
+    private float playerTerrainDamageTimer;
+    private float playerHitRadius = 1.05f;
+    private float expToNextLevel;
+    private float currentExp;
+    private int currentWave = 1;
+    private int playerLevel = 1;
+    private int currentAmmo;
+    private int rewindUsesRemaining;
+    private int pendingLevelChoices;
+    private int earnedGold;
+    private int earnedUserExp;
+
+    private bool initialized;
+    private bool loadingFromSave;
+    private bool isPaused;
+    private bool showPauseMenu;
+    private bool showSettlement;
+    private bool showUpgradeChoices;
+    private bool showWaterEffectPrompt;
+    private bool isRestoringSnapshot;
+    private bool hasSettledRewards;
+    private bool hasShownWaterEffectPrompt;
+    private bool wasPlayerInWaterLastFrame;
+
+    public PlayerRuntimeStats PlayerStats => playerStats;
+    public float PlayerHitRadius => playerHitRadius;
+    public float ElapsedTime => elapsedTime;
+    public int CurrentWave => currentWave;
+    public float NextWaveIn => Mathf.Max(0f, inGameConfig != null ? inGameConfig.WaveDuration - (elapsedTime % inGameConfig.WaveDuration) : 0f);
+    public int PlayerLevel => playerLevel;
+    public float CurrentExp => currentExp;
+    public float ExpToNextLevel => Mathf.Max(1f, expToNextLevel);
+    public float ExpRatio => Mathf.Clamp01(ExpToNextLevel <= 0f ? 0f : CurrentExp / ExpToNextLevel);
+    public int CurrentAmmo => currentAmmo;
+    public int MaxAmmo => weaponProfile != null ? weaponProfile.MaxAmmo : 0;
+    public int CurrentExtraPierce => Mathf.Max(0, (weaponProfile != null ? weaponProfile.Pierce : 0) + sessionBonuses.BonusPierce);
+    public int CurrentVolleyCount => 1 + Mathf.Max(0, sessionBonuses.BonusProjectileCount + sessionBonuses.BonusVolleyCount);
+    public int CurrentBurstCount => 1 + Mathf.Max(0, sessionBonuses.BonusBurstCount);
+    public float CurrentFireRate => weaponProfile != null
+        ? Mathf.Max(0.1f, weaponProfile.ShootRate + (playerStats != null ? playerStats.ShootSpeed * 0.25f : 0f))
+        : 1f;
+    public float ReloadRemaining => reloadRemaining;
+    public bool IsReloading => reloadRemaining > 0f;
+    public int RewindUsesRemaining => rewindUsesRemaining;
+    public bool IsPaused => isPaused;
+    public bool ShowPauseMenu => showPauseMenu;
+    public bool ShowSettlement => showSettlement;
+    public bool ShowUpgradeChoices => showUpgradeChoices;
+    public bool ShowWaterEffectPrompt => showWaterEffectPrompt;
+    public bool CanAcceptPlayerInput => initialized && !isPaused && !showPauseMenu && !showSettlement && !showUpgradeChoices && !showWaterEffectPrompt && !isRestoringSnapshot;
+    public IReadOnlyList<PowerCardData> CurrentCardChoices => currentCardChoices;
+    public IReadOnlyList<OwnedPowerCardInfo> OwnedPowerCards => ownedPowerCards;
+    public int EarnedGold => earnedGold;
+    public int EarnedUserExp => earnedUserExp;
+    public int CurrentPlayerUpgradeLevel => UserProgressRepository.GetUpgradeLevel(GameSelectionConfig.CurrentPlayerType);
+
+    public bool IsInsideMapBounds(Vector2 point, float padding = 0f)
+    {
+        if (mapConfig == null)
+        {
+            return true;
+        }
+
+        return point.x >= mapConfig.MinX + padding
+            && point.x <= mapConfig.MaxX - padding
+            && point.y >= mapConfig.MinY + padding
+            && point.y <= mapConfig.MaxY - padding;
+    }
+
+    public int GetCardStack(string cardKey)
+    {
+        return cardStacks.TryGetValue(cardKey, out int stackCount) ? stackCount : 0;
+    }
+
+    public static RoguelikeGameManager EnsureExists(GameObject host)
+    {
+        if (Instance != null)
+        {
+            return Instance;
+        }
+
+        RoguelikeGameManager existing = host.GetComponent<RoguelikeGameManager>();
+        return existing != null ? existing : host.AddComponent<RoguelikeGameManager>();
+    }
+
+    private void Awake()
+    {
+        if (Instance != null && Instance != this)
+        {
+            Destroy(this);
+            return;
+        }
+
+        Instance = this;
+    }
+
+    private void OnDestroy()
+    {
+        if (Instance == this)
+        {
+            Instance = null;
+        }
+    }
+
+    private void Update()
+    {
+        TryInitialize();
+        if (!initialized)
+        {
+            return;
+        }
+
+        if (showWaterEffectPrompt)
+        {
+            if (Input.anyKeyDown)
+            {
+                CloseWaterEffectPrompt();
+            }
+
+            return;
+        }
+
+        if (showSettlement || isRestoringSnapshot)
+        {
+            return;
+        }
+
+        if (Input.GetKeyDown(KeyCode.R))
+        {
+            BeginRewind();
+        }
+
+        UpdateReload(Time.unscaledDeltaTime);
+        activeSkillCooldownRemaining = Mathf.Max(0f, activeSkillCooldownRemaining - Time.unscaledDeltaTime);
+
+        if (showPauseMenu || showUpgradeChoices || isPaused)
+        {
+            return;
+        }
+
+        float deltaTime = Time.deltaTime;
+        elapsedTime += deltaTime;
+        nextSnapshotTimer += deltaTime;
+        nextAutoSaveTimer += deltaTime;
+
+        UpdateWaveState();
+        UpdateWaveSpawns(deltaTime);
+        UpdatePlayerTerrainEffects(deltaTime);
+        if (showSettlement || showWaterEffectPrompt || isPaused)
+        {
+            return;
+        }
+
+        UpdateBullets(deltaTime);
+        UpdateEnemies(deltaTime);
+        UpdatePickups(deltaTime);
+        UpdateDamageTexts(deltaTime);
+
+        if (nextSnapshotTimer >= saveConfig.SnapshotInterval)
+        {
+            nextSnapshotTimer = 0f;
+            SessionSaveRepository.WriteSnapshot(CaptureSnapshot(), saveConfig.SnapshotKeepCount);
+        }
+
+        if (nextAutoSaveTimer >= saveConfig.AutoSaveSeconds)
+        {
+            nextAutoSaveTimer = 0f;
+            SaveSession();
+        }
+    }
+
+    private void TryInitialize()
+    {
+        if (initialized)
+        {
+            return;
+        }
+
+        inGameConfig = RoguelikeDataRepository.GetInGameConfig();
+        mapConfig = RoguelikeDataRepository.GetMapConfig();
+        saveConfig = RoguelikeDataRepository.GetSaveConfig();
+
+        if (!ResolvePlayerContext())
+        {
+            return;
+        }
+
+        EnsurePoolRoot();
+        PrepareTemplates();
+        PreparePools();
+        ResetForNewRun();
+
+        if (SessionSaveRepository.HasPendingSaveSelection() || SessionSaveRepository.HasSavedSession())
+        {
+            loadingFromSave = true;
+            LoadSavedSession();
+        }
+        else
+        {
+            QueueWave(currentWave);
+        }
+
+        initialized = true;
+    }
+
+    private bool ResolvePlayerContext()
+    {
+        Transform playersRoot = GameObject.Find("Players")?.transform;
+        if (playersRoot == null)
+        {
+            return false;
+        }
+
+        for (int index = 0; index < playersRoot.childCount; index++)
+        {
+            Transform candidate = playersRoot.GetChild(index);
+            if (!candidate.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            activePlayer = candidate;
+            break;
+        }
+
+        if (activePlayer == null)
+        {
+            return false;
+        }
+
+        playerStats = activePlayer.GetComponent<PlayerRuntimeStats>();
+        if (playerStats == null)
+        {
+            playerStats = activePlayer.gameObject.AddComponent<PlayerRuntimeStats>();
+        }
+
+        weaponProfile = RoguelikeDataRepository.GetWeaponProfile(GameSelectionConfig.CurrentWeaponType);
+        activeWeapon = activePlayer.GetComponentInChildren<Ak47>(true);
+        cameraFollow = FindAnyObjectByType<CameraFollow>();
+        mapGenerator = FindAnyObjectByType<MapGenerator>();
+        if (cameraFollow != null)
+        {
+            cameraFollow.target = activePlayer;
+        }
+
+        return activeWeapon != null;
+    }
+
+    private void PrepareTemplates()
+    {
+        enemyTemplateRoot = GameObject.Find("Enemys")?.transform;
+        bulletTemplate = GameObject.Find("bullet")?.transform;
+
+        if (enemyTemplateRoot != null)
+        {
+            for (int index = 0; index < enemyTemplateRoot.childCount; index++)
+            {
+                enemyTemplateRoot.GetChild(index).gameObject.SetActive(false);
+            }
+        }
+
+        if (bulletTemplate != null)
+        {
+            bulletTemplate.gameObject.SetActive(false);
+        }
+    }
+
+    private void PreparePools()
+    {
+        if (bulletPool == null)
+        {
+            bulletPool = new ComponentPool<Bullet>(CreateBulletInstance);
+            bulletPool.Warm(Mathf.Max(24, weaponProfile.PoolSize));
+        }
+
+        if (pickupPool == null)
+        {
+            pickupPool = new ComponentPool<ExperiencePickup>(CreatePickupInstance);
+            pickupPool.Warm(48);
+        }
+
+        if (damageTextPool == null)
+        {
+            damageTextPool = new ComponentPool<FloatingDamageText>(CreateDamageTextInstance);
+            damageTextPool.Warm(12);
+        }
+
+        enemyPools.Clear();
+        EnemyProfile normalEnemy = RoguelikeDataRepository.GetEnemyProfile("Enemy1");
+        EnemyProfile eliteEnemy = RoguelikeDataRepository.GetDefaultEliteProfile();
+        CreateEnemyPool(normalEnemy);
+        CreateEnemyPool(eliteEnemy);
+    }
+
+    private void ResetForNewRun()
+    {
+        sessionBonuses.Clear();
+        PlayerProfile profile = RoguelikeDataRepository.GetPlayerProfile(GameSelectionConfig.CurrentPlayerType);
+        playerStats.ApplyProfile(profile);
+        ApplyBonusesToPlayer();
+
+        currentWave = 1;
+        playerLevel = 1;
+        currentExp = 0f;
+        expToNextLevel = GetRequiredExpForNextLevel(playerLevel);
+        currentAmmo = weaponProfile.MaxAmmo;
+        reloadRemaining = 0f;
+        activeSkillCooldownRemaining = 0f;
+        playerTerrainDamageTimer = 0f;
+        rewindUsesRemaining = inGameConfig.RewindUsesPerRun;
+        elapsedTime = 0f;
+        nextSnapshotTimer = 0f;
+        nextAutoSaveTimer = 0f;
+        pendingLevelChoices = 0;
+        earnedGold = 0;
+        earnedUserExp = 0;
+        hasSettledRewards = false;
+        loadingFromSave = false;
+        isPaused = false;
+        showPauseMenu = false;
+        showSettlement = false;
+        showUpgradeChoices = false;
+        showWaterEffectPrompt = false;
+        isRestoringSnapshot = false;
+        hasShownWaterEffectPrompt = false;
+        wasPlayerInWaterLastFrame = false;
+        cardStacks.Clear();
+        ownedPowerCards.Clear();
+        currentCardChoices.Clear();
+        ReleaseAllBullets();
+        ReleaseAllEnemies();
+        ReleaseAllPickups();
+        ReleaseAllDamageTexts();
+        activeWaveSpawns.Clear();
+
+        activePlayer.position = GetInitialPlayerSpawnPosition();
+    }
+
+    public bool TryFireWeapon(Vector3 muzzlePosition, Vector2 direction)
+    {
+        if (!CanAcceptPlayerInput || playerStats == null || weaponProfile == null)
+        {
+            return false;
+        }
+
+        if (reloadRemaining > 0f)
+        {
+            return false;
+        }
+
+        if (currentAmmo <= 0)
+        {
+            BeginReload();
+            return false;
+        }
+
+        int volleyCount = CurrentVolleyCount;
+        int burstCount = CurrentBurstCount;
+        float spread = Mathf.Max(8f, weaponProfile.SpreadAngle);
+        int totalDamage = Mathf.Max(1, weaponProfile.Damage + playerStats.Attack + sessionBonuses.BonusAttack);
+        float bulletSpeed = weaponProfile.ProjectileSpeed + sessionBonuses.BonusBulletSpeed;
+        int totalPierce = Mathf.Max(0, weaponProfile.Pierce + sessionBonuses.BonusPierce);
+
+        for (int burstIndex = 0; burstIndex < burstCount; burstIndex++)
+        {
+            for (int volleyIndex = 0; volleyIndex < volleyCount; volleyIndex++)
+            {
+                float angleOffset = volleyCount == 1 ? 0f : Mathf.Lerp(-spread, spread, volleyIndex / (float)(volleyCount - 1));
+                Quaternion spreadRotation = Quaternion.Euler(0f, 0f, angleOffset);
+                Vector2 finalDirection = spreadRotation * direction.normalized;
+
+                Bullet bullet = bulletPool.Get();
+                bullet.Fire(
+                    this,
+                    muzzlePosition,
+                    finalDirection,
+                    totalDamage,
+                    bulletSpeed,
+                    weaponProfile.BulletLifetime,
+                    totalPierce,
+                    weaponProfile.ProjectileScale);
+                activeBullets.Add(bullet);
+            }
+        }
+
+        currentAmmo = Mathf.Max(0, currentAmmo - 1);
+        if (currentAmmo <= 0)
+        {
+            BeginReload();
+        }
+
+        return true;
+    }
+
+    public bool ProcessBulletHit(Bullet bullet)
+    {
+        Vector2 segmentStart = bullet.PreviousPosition;
+        Vector2 segmentEnd = bullet.Position;
+        float hitDistance = bullet.HitRadius;
+        List<BulletHitInfo> hitInfos = new List<BulletHitInfo>();
+
+        for (int index = activeEnemies.Count - 1; index >= 0; index--)
+        {
+            EnemyActor enemy = activeEnemies[index];
+            if (bullet.HasHitEnemy(enemy))
+            {
+                continue;
+            }
+
+            float combinedRadius = hitDistance + enemy.HitRadius;
+            if (!SegmentCircleIntersects(segmentStart, segmentEnd, enemy.Position, combinedRadius, out float hitT))
+            {
+                continue;
+            }
+
+            hitInfos.Add(new BulletHitInfo
+            {
+                Enemy = enemy,
+                HitT = hitT
+            });
+        }
+
+        if (hitInfos.Count == 0)
+        {
+            return true;
+        }
+
+        hitInfos.Sort((left, right) => left.HitT.CompareTo(right.HitT));
+        for (int index = 0; index < hitInfos.Count; index++)
+        {
+            EnemyActor targetEnemy = hitInfos[index].Enemy;
+            if (targetEnemy == null || bullet.HasHitEnemy(targetEnemy))
+            {
+                continue;
+            }
+
+            bullet.RegisterEnemyHit(targetEnemy);
+            bool enemyAlive = targetEnemy.TakeDamage(bullet.Damage);
+            if (!enemyAlive)
+            {
+                HandleEnemyDefeated(targetEnemy);
+            }
+
+            if (bullet.RemainingPierce <= 0)
+            {
+                return false;
+            }
+
+            bullet.ConsumePierce();
+        }
+
+        return true;
+    }
+
+    public void DamagePlayer(int damage)
+    {
+        if (showSettlement || playerStats == null)
+        {
+            return;
+        }
+
+        int actualDamage = Mathf.Max(1, damage);
+        playerStats.ModifyCurrentHp(-actualDamage);
+        SpawnDamageText(activePlayer.position + new Vector3(0f, 1.35f, 0f), actualDamage, true);
+        if (playerStats.CurrentHp > 0)
+        {
+            return;
+        }
+
+        BeginSettlement(false);
+    }
+
+    public void CollectPickup(ExperiencePickup pickup)
+    {
+        if (pickup == null)
+        {
+            return;
+        }
+
+        if (pickup.GrantsFreeLevel)
+        {
+            pendingLevelChoices++;
+            OpenUpgradeChoicesIfNeeded();
+        }
+        else
+        {
+            AddExperience(pickup.ExperienceValue);
+            if (sessionBonuses.BonusHealOnPickup > 0)
+            {
+                playerStats.ModifyCurrentHp(sessionBonuses.BonusHealOnPickup);
+            }
+        }
+
+    }
+
+    public void TogglePauseMenu()
+    {
+        if (!initialized || showSettlement || showUpgradeChoices || isRestoringSnapshot)
+        {
+            return;
+        }
+
+        showPauseMenu = !showPauseMenu;
+        SetPaused(showPauseMenu);
+    }
+
+    public void ChooseUpgradeCard(int cardIndex)
+    {
+        if (!showUpgradeChoices || cardIndex < 0 || cardIndex >= currentCardChoices.Count)
+        {
+            return;
+        }
+
+        PowerCardData card = currentCardChoices[cardIndex];
+        int currentStack = cardStacks.TryGetValue(card.CardKey, out int stackValue) ? stackValue : 0;
+        if (currentStack < card.MaxStacks)
+        {
+            cardStacks[card.CardKey] = currentStack + 1;
+            RecalculateCardBonuses();
+        }
+
+        pendingLevelChoices = Mathf.Max(0, pendingLevelChoices - 1);
+        currentCardChoices.Clear();
+        showUpgradeChoices = false;
+
+        if (pendingLevelChoices > 0)
+        {
+            OpenUpgradeChoicesIfNeeded();
+            return;
+        }
+
+        SetPaused(false);
+    }
+
+    public void BeginRewind()
+    {
+        if (!CanAcceptPlayerInput || rewindUsesRemaining <= 0)
+        {
+            return;
+        }
+
+        if (!SessionSaveRepository.TryLoadLatestSnapshot(out SessionSnapshotData snapshot))
+        {
+            return;
+        }
+
+        int remainingAfterRewind = Mathf.Max(0, rewindUsesRemaining - 1);
+        StartCoroutine(RestoreSnapshotRoutine(snapshot, remainingAfterRewind));
+    }
+
+    public void SaveSession()
+    {
+        SessionSaveRepository.SaveSession(CaptureSnapshot());
+    }
+
+    public void CreateManualSave()
+    {
+        SessionSaveRepository.CreateManualSave(CaptureSnapshot());
+    }
+
+    public void FinalizeRun()
+    {
+        BeginSettlement(true);
+    }
+
+    public void ReturnToMainMenu()
+    {
+        Time.timeScale = 1f;
+        SceneManager.LoadScene("MainMenuScene");
+    }
+
+    public void QuitGameWithSave()
+    {
+        SaveSession();
+        UserProgressRepository.Save();
+#if UNITY_EDITOR
+        UnityEditor.EditorApplication.isPlaying = false;
+#else
+        Application.Quit();
+#endif
+    }
+
+    public SessionSnapshotData CaptureSnapshot()
+    {
+        SessionSnapshotData snapshot = new SessionSnapshotData
+        {
+            PlayerType = GameSelectionConfig.CurrentPlayerType,
+            WeaponType = GameSelectionConfig.CurrentWeaponType,
+            ElapsedTime = elapsedTime,
+            CurrentWave = currentWave,
+            PlayerLevel = playerLevel,
+            CurrentExp = currentExp,
+            ExpToNextLevel = expToNextLevel,
+            PlayerPositionX = activePlayer.position.x,
+            PlayerPositionY = activePlayer.position.y,
+            PlayerHp = playerStats.CurrentHp,
+            CurrentAmmo = currentAmmo,
+            ReloadRemaining = reloadRemaining,
+            SkillCooldownRemaining = activeSkillCooldownRemaining,
+            RewindUsesRemaining = rewindUsesRemaining,
+            PendingLevelUpChoices = pendingLevelChoices
+        };
+
+        foreach (KeyValuePair<string, int> pair in cardStacks)
+        {
+            snapshot.Cards.Add(new SessionCardState
+            {
+                CardKey = pair.Key,
+                StackCount = pair.Value
+            });
+        }
+
+        for (int index = 0; index < activeEnemies.Count; index++)
+        {
+            EnemyActor enemy = activeEnemies[index];
+            snapshot.Enemies.Add(new SessionEnemyState
+            {
+                EnemyKey = enemy.EnemyKey,
+                PositionX = enemy.Position.x,
+                PositionY = enemy.Position.y,
+                CurrentHp = enemy.CurrentHp,
+                IsElite = enemy.IsElite
+            });
+        }
+
+        for (int index = 0; index < activePickups.Count; index++)
+        {
+            ExperiencePickup pickup = activePickups[index];
+            snapshot.Pickups.Add(new SessionPickupState
+            {
+                PositionX = pickup.Position.x,
+                PositionY = pickup.Position.y,
+                ExperienceValue = pickup.ExperienceValue,
+                GrantsFreeLevel = pickup.GrantsFreeLevel
+            });
+        }
+
+        return snapshot;
+    }
+
+    private void LoadSavedSession()
+    {
+        if (!SessionSaveRepository.TryLoadRequestedSession(out SessionSnapshotData snapshot))
+        {
+            loadingFromSave = false;
+            QueueWave(currentWave);
+            return;
+        }
+
+        StartCoroutine(RestoreSnapshotRoutine(snapshot, -1));
+    }
+
+    private IEnumerator RestoreSnapshotRoutine(SessionSnapshotData snapshot, int forcedRewindUsesRemaining)
+    {
+        isRestoringSnapshot = true;
+        showPauseMenu = false;
+        showUpgradeChoices = false;
+        showSettlement = false;
+        SetPaused(true);
+
+        ReleaseAllBullets();
+        yield return null;
+
+        ReleaseAllEnemies();
+        yield return null;
+
+        ReleaseAllPickups();
+        yield return null;
+
+        GameSelectionConfig.CurrentPlayerType = snapshot.PlayerType;
+        GameSelectionConfig.CurrentWeaponType = snapshot.WeaponType;
+        GameSceneSelectionApplier.Apply(snapshot.PlayerType, snapshot.WeaponType);
+        ResolvePlayerContext();
+
+        weaponProfile = RoguelikeDataRepository.GetWeaponProfile(snapshot.WeaponType);
+        currentWave = Mathf.Max(1, snapshot.CurrentWave);
+        playerLevel = Mathf.Max(1, snapshot.PlayerLevel);
+        currentExp = Mathf.Max(0f, snapshot.CurrentExp);
+        expToNextLevel = Mathf.Max(1f, snapshot.ExpToNextLevel);
+        currentAmmo = Mathf.Clamp(snapshot.CurrentAmmo, 0, weaponProfile.MaxAmmo);
+        reloadRemaining = Mathf.Max(0f, snapshot.ReloadRemaining);
+        activeSkillCooldownRemaining = Mathf.Max(0f, snapshot.SkillCooldownRemaining);
+        playerTerrainDamageTimer = 0f;
+        rewindUsesRemaining = Mathf.Max(0, snapshot.RewindUsesRemaining);
+        if (forcedRewindUsesRemaining >= 0)
+        {
+            rewindUsesRemaining = Mathf.Min(rewindUsesRemaining, forcedRewindUsesRemaining);
+        }
+        pendingLevelChoices = Mathf.Max(0, snapshot.PendingLevelUpChoices);
+        elapsedTime = Mathf.Max(0f, snapshot.ElapsedTime);
+        nextSnapshotTimer = 0f;
+        nextAutoSaveTimer = 0f;
+        earnedGold = currentWave * inGameConfig.RewardGoldPerWave;
+        earnedUserExp = currentWave * inGameConfig.RewardExpPerWave;
+        cardStacks.Clear();
+        for (int index = 0; index < snapshot.Cards.Count; index++)
+        {
+            cardStacks[snapshot.Cards[index].CardKey] = snapshot.Cards[index].StackCount;
+        }
+
+        RecalculateCardBonuses();
+        activePlayer.position = new Vector3(snapshot.PlayerPositionX, snapshot.PlayerPositionY, 0f);
+        playerStats.SetCurrentHp(snapshot.PlayerHp);
+        activeWaveSpawns.Clear();
+        QueueWave(currentWave);
+
+        for (int index = 0; index < snapshot.Enemies.Count; index++)
+        {
+            SessionEnemyState enemyState = snapshot.Enemies[index];
+            EnemyProfile profile = RoguelikeDataRepository.GetEnemyProfile(enemyState.EnemyKey);
+            EnemyActor enemy = SpawnEnemy(profile, enemyState.IsElite, new Vector3(enemyState.PositionX, enemyState.PositionY, 0f));
+            enemy.RestoreState(enemyState.CurrentHp);
+            if (index % 4 == 0)
+            {
+                yield return null;
+            }
+        }
+
+        for (int index = 0; index < snapshot.Pickups.Count; index++)
+        {
+            SessionPickupState pickupState = snapshot.Pickups[index];
+            SpawnPickup(new Vector3(pickupState.PositionX, pickupState.PositionY, 0f), pickupState.ExperienceValue, pickupState.GrantsFreeLevel);
+            if (index % 8 == 0)
+            {
+                yield return null;
+            }
+        }
+
+        isRestoringSnapshot = false;
+        loadingFromSave = false;
+        SetPaused(false);
+        OpenUpgradeChoicesIfNeeded();
+    }
+
+    private void UpdatePlayerTerrainEffects(float deltaTime)
+    {
+        if (playerStats == null || activePlayer == null)
+        {
+            return;
+        }
+
+        TerrainSurfaceType terrainType = GetTerrainType(activePlayer.position);
+        bool isInWater = terrainType == TerrainSurfaceType.Water;
+
+        if (isInWater && !wasPlayerInWaterLastFrame && !hasShownWaterEffectPrompt)
+        {
+            OpenWaterEffectPrompt();
+            wasPlayerInWaterLastFrame = true;
+            playerStats.SetEnvironmentMoveSpeedModifier(GetTerrainMoveSpeedModifier(activePlayer.position));
+            return;
+        }
+
+        wasPlayerInWaterLastFrame = isInWater;
+        float moveModifier = GetTerrainMoveSpeedModifier(activePlayer.position);
+        playerStats.SetEnvironmentMoveSpeedModifier(moveModifier);
+
+        float damagePerSecond = terrainType == TerrainSurfaceType.Water ? 1f : 0f;
+        if (damagePerSecond <= 0f)
+        {
+            playerTerrainDamageTimer = 0f;
+            return;
+        }
+
+        playerTerrainDamageTimer += deltaTime * damagePerSecond;
+        while (playerTerrainDamageTimer >= 1f)
+        {
+            playerTerrainDamageTimer -= 1f;
+            DamagePlayer(1);
+            if (showSettlement)
+            {
+                break;
+            }
+        }
+    }
+
+    private void OpenWaterEffectPrompt()
+    {
+        hasShownWaterEffectPrompt = true;
+        showWaterEffectPrompt = true;
+        showPauseMenu = false;
+        SetPaused(true);
+    }
+
+    private void CloseWaterEffectPrompt()
+    {
+        showWaterEffectPrompt = false;
+        SetPaused(false);
+    }
+
+    public float GetTerrainMoveSpeedModifier(Vector3 position)
+    {
+        TerrainSurfaceType terrainType = GetTerrainType(position);
+        if (terrainType == TerrainSurfaceType.Water)
+        {
+            return -2f;
+        }
+
+        if (terrainType == TerrainSurfaceType.Grass)
+        {
+            return 2f;
+        }
+
+        return 0f;
+    }
+
+    public float GetTerrainDamagePerSecond(Vector3 position)
+    {
+        return GetTerrainType(position) == TerrainSurfaceType.Water ? 1f : 0f;
+    }
+
+    private TerrainSurfaceType GetTerrainType(Vector3 position)
+    {
+        if (mapGenerator == null)
+        {
+            mapGenerator = FindAnyObjectByType<MapGenerator>();
+        }
+
+        return mapGenerator != null ? mapGenerator.GetTerrainType(position) : TerrainSurfaceType.Ground;
+    }
+
+    private void UpdateWaveState()
+    {
+        int calculatedWave = Mathf.FloorToInt(elapsedTime / inGameConfig.WaveDuration) + 1;
+        if (calculatedWave <= currentWave)
+        {
+            return;
+        }
+
+        currentWave = calculatedWave;
+        QueueWave(currentWave);
+    }
+
+    private void QueueWave(int waveIndex)
+    {
+        activeWaveSpawns.Clear();
+        List<WaveProfile> waveProfiles = RoguelikeDataRepository.GetWaveProfilesFor(waveIndex);
+        for (int index = 0; index < waveProfiles.Count; index++)
+        {
+            WaveProfile wave = waveProfiles[index];
+            EnemyProfile enemyProfile = RoguelikeDataRepository.GetEnemyProfile(wave.EnemyKey);
+            activeWaveSpawns.Add(new ActiveWaveSpawn
+            {
+                Profile = enemyProfile,
+                RemainingCount = wave.SpawnCount,
+                SpawnInterval = wave.SpawnInterval,
+                Timer = 0f,
+                IsElite = false
+            });
+
+            if (waveIndex % 5 == 0 && wave.EliteCount > 0)
+            {
+                EnemyProfile eliteProfile = RoguelikeDataRepository.GetEnemyProfile(wave.EliteEnemyKey);
+                activeWaveSpawns.Add(new ActiveWaveSpawn
+                {
+                    Profile = eliteProfile,
+                    RemainingCount = wave.EliteCount,
+                    SpawnInterval = Mathf.Max(1f, wave.SpawnInterval * 2f),
+                    Timer = 0.25f,
+                    IsElite = true
+                });
+            }
+        }
+
+        earnedGold = currentWave * inGameConfig.RewardGoldPerWave;
+        earnedUserExp = currentWave * inGameConfig.RewardExpPerWave;
+    }
+
+    private void UpdateWaveSpawns(float deltaTime)
+    {
+        for (int index = 0; index < activeWaveSpawns.Count; index++)
+        {
+            ActiveWaveSpawn spawn = activeWaveSpawns[index];
+            if (spawn.RemainingCount <= 0)
+            {
+                continue;
+            }
+
+            spawn.Timer -= deltaTime;
+            if (spawn.Timer > 0f)
+            {
+                continue;
+            }
+
+            spawn.Timer = spawn.SpawnInterval;
+            spawn.RemainingCount--;
+            SpawnEnemy(spawn.Profile, spawn.IsElite, GetSpawnPositionAroundPlayer());
+        }
+    }
+
+    private void UpdateBullets(float deltaTime)
+    {
+        for (int index = activeBullets.Count - 1; index >= 0; index--)
+        {
+            if (activeBullets[index].Tick(deltaTime))
+            {
+                continue;
+            }
+
+            ReleaseBullet(activeBullets[index]);
+        }
+    }
+
+    private void UpdateEnemies(float deltaTime)
+    {
+        Vector3 playerPosition = activePlayer.position;
+        for (int index = activeEnemies.Count - 1; index >= 0; index--)
+        {
+            if (activeEnemies[index].Tick(deltaTime, playerPosition))
+            {
+                continue;
+            }
+
+            HandleEnemyDefeated(activeEnemies[index]);
+        }
+    }
+
+    private void UpdatePickups(float deltaTime)
+    {
+        float pickupRadius = inGameConfig.PickupRadius + sessionBonuses.BonusPickupRadius;
+        Vector3 playerPosition = activePlayer.position;
+        for (int index = activePickups.Count - 1; index >= 0; index--)
+        {
+            if (activePickups[index].Tick(deltaTime, playerPosition, pickupRadius))
+            {
+                continue;
+            }
+
+            ReleasePickup(activePickups[index]);
+        }
+    }
+
+    private void UpdateDamageTexts(float deltaTime)
+    {
+        for (int index = activeDamageTexts.Count - 1; index >= 0; index--)
+        {
+            if (activeDamageTexts[index].Tick(deltaTime))
+            {
+                continue;
+            }
+
+            ReleaseDamageText(activeDamageTexts[index]);
+        }
+    }
+
+    private void AddExperience(float amount)
+    {
+        currentExp += Mathf.Max(0f, amount);
+        while (currentExp >= expToNextLevel)
+        {
+            currentExp -= expToNextLevel;
+            playerLevel++;
+            expToNextLevel = GetRequiredExpForNextLevel(playerLevel);
+            pendingLevelChoices++;
+        }
+
+        OpenUpgradeChoicesIfNeeded();
+    }
+
+    private void OpenUpgradeChoicesIfNeeded()
+    {
+        if (pendingLevelChoices <= 0 || showUpgradeChoices || showSettlement)
+        {
+            return;
+        }
+
+        currentCardChoices.Clear();
+        List<PowerCardData> allCards = RoguelikeDataRepository.GetPowerCards();
+        List<PowerCardData> candidates = new List<PowerCardData>();
+        for (int index = 0; index < allCards.Count; index++)
+        {
+            int stackCount = cardStacks.TryGetValue(allCards[index].CardKey, out int value) ? value : 0;
+            if (stackCount >= allCards[index].MaxStacks)
+            {
+                continue;
+            }
+
+            int weight = Mathf.Max(1, allCards[index].Weight);
+            for (int repeat = 0; repeat < weight; repeat++)
+            {
+                candidates.Add(allCards[index]);
+            }
+        }
+
+        int choiceCount = Mathf.Min(inGameConfig.CardChoiceCount, candidates.Count);
+        while (currentCardChoices.Count < choiceCount && candidates.Count > 0)
+        {
+            int randomIndex = Random.Range(0, candidates.Count);
+            PowerCardData selected = candidates[randomIndex];
+            if (!currentCardChoices.Contains(selected))
+            {
+                currentCardChoices.Add(selected);
+            }
+
+            candidates.RemoveAll(card => card.CardKey == selected.CardKey);
+        }
+
+        if (currentCardChoices.Count == 0)
+        {
+            pendingLevelChoices = 0;
+            return;
+        }
+
+        showUpgradeChoices = true;
+        SetPaused(true);
+    }
+
+    private void RecalculateCardBonuses()
+    {
+        sessionBonuses.Clear();
+        ownedPowerCards.Clear();
+        List<PowerCardData> cards = RoguelikeDataRepository.GetPowerCards();
+        Dictionary<string, PowerCardData> lookup = new Dictionary<string, PowerCardData>(System.StringComparer.OrdinalIgnoreCase);
+        for (int index = 0; index < cards.Count; index++)
+        {
+            lookup[cards[index].CardKey] = cards[index];
+        }
+
+        foreach (KeyValuePair<string, int> pair in cardStacks)
+        {
+            if (!lookup.TryGetValue(pair.Key, out PowerCardData card))
+            {
+                continue;
+            }
+
+            ownedPowerCards.Add(new OwnedPowerCardInfo
+            {
+                Card = card,
+                StackCount = pair.Value
+            });
+            sessionBonuses.BonusHp += card.BonusHp * pair.Value;
+            sessionBonuses.BonusAttack += card.BonusAttack * pair.Value;
+            sessionBonuses.BonusMoveSpeed += card.BonusMoveSpeed * pair.Value;
+            sessionBonuses.BonusShootRate += card.BonusShootRate * pair.Value;
+            sessionBonuses.BonusBulletSpeed += card.BonusBulletSpeed * pair.Value;
+            sessionBonuses.BonusProjectileCount += card.BonusProjectileCount * pair.Value;
+            sessionBonuses.BonusVolleyCount += card.BonusVolleyCount * pair.Value;
+            sessionBonuses.BonusBurstCount += card.BonusBurstCount * pair.Value;
+            sessionBonuses.BonusPierce += card.BonusPierce * pair.Value;
+            sessionBonuses.BonusPickupRadius += card.BonusPickupRadius * pair.Value;
+            sessionBonuses.BonusHealOnPickup += card.BonusHealOnPickup * pair.Value;
+        }
+
+        ownedPowerCards.Sort((left, right) => string.CompareOrdinal(left.Card?.Title, right.Card?.Title));
+
+        ApplyBonusesToPlayer();
+    }
+
+    private void ApplyBonusesToPlayer()
+    {
+        if (playerStats == null)
+        {
+            return;
+        }
+
+        playerStats.ApplySessionBonuses(
+            sessionBonuses.BonusHp,
+            sessionBonuses.BonusAttack,
+            sessionBonuses.BonusMoveSpeed,
+            sessionBonuses.BonusShootRate);
+    }
+
+    private void HandleEnemyDefeated(EnemyActor enemy)
+    {
+        if (enemy == null)
+        {
+            return;
+        }
+
+        if (enemy.IsElite)
+        {
+            SpawnPickup(enemy.transform.position, 0f, true);
+        }
+        else
+        {
+            EnemyProfile profile = RoguelikeDataRepository.GetEnemyProfile(enemy.EnemyKey);
+            SpawnPickup(enemy.transform.position, profile.ExperienceDrop, false);
+        }
+
+        ReleaseEnemy(enemy);
+    }
+
+    private void SpawnPickup(Vector3 position, float experienceValue, bool grantsFreeLevel)
+    {
+        ExperiencePickup pickup = pickupPool.Get();
+        pickup.Configure(this, position, experienceValue, grantsFreeLevel, grantsFreeLevel ? 4.4f : 3.4f);
+        activePickups.Add(pickup);
+    }
+
+    private EnemyActor SpawnEnemy(EnemyProfile profile, bool forceElite, Vector3 position)
+    {
+        CreateEnemyPool(profile);
+        EnemyActor enemy = enemyPools[profile.EnemyKey].Get();
+        enemy.transform.position = position;
+
+        int waveScaling = Mathf.Max(0, currentWave - 1);
+        bool isElite = forceElite || profile.IsElite;
+        float hpMultiplier = isElite ? 1.75f : 1f;
+        float attackMultiplier = isElite ? 1.45f : 1f;
+        float moveMultiplier = isElite ? 1.2f : 1f;
+        float scaleMultiplier = isElite ? 1.15f : 1f;
+
+        enemy.Configure(
+            this,
+            profile,
+            Mathf.RoundToInt((profile.MaxHp + (waveScaling * 8)) * hpMultiplier),
+            Mathf.RoundToInt((profile.Attack + waveScaling) * attackMultiplier),
+            (profile.MoveSpeed + (waveScaling * 0.05f)) * moveMultiplier,
+            profile.AttackInterval,
+            profile.ContactRange,
+            profile.Scale * scaleMultiplier,
+            isElite);
+
+        activeEnemies.Add(enemy);
+        return enemy;
+    }
+
+    private Vector3 GetSpawnPositionAroundPlayer()
+    {
+        Vector3 playerPosition = activePlayer.position;
+        for (int attempt = 0; attempt < 12; attempt++)
+        {
+            Vector2 direction = Random.insideUnitCircle.normalized;
+            if (direction.sqrMagnitude < 0.1f)
+            {
+                direction = Vector2.right;
+            }
+
+            float distance = Random.Range(inGameConfig.SpawnMinDistance, inGameConfig.SpawnMaxDistance);
+            Vector3 position = playerPosition + (Vector3)(direction * distance);
+            position.x = Mathf.Clamp(position.x, mapConfig.MinX + mapConfig.SafeMargin, mapConfig.MaxX - mapConfig.SafeMargin);
+            position.y = Mathf.Clamp(position.y, mapConfig.MinY + mapConfig.SafeMargin, mapConfig.MaxY - mapConfig.SafeMargin);
+
+            float actualDistance = Vector2.Distance(position, playerPosition);
+            if (actualDistance >= inGameConfig.SpawnMinDistance - 0.5f && actualDistance <= inGameConfig.SpawnMaxDistance + 0.5f)
+            {
+                return position;
+            }
+        }
+
+        return new Vector3(playerPosition.x + inGameConfig.SpawnMinDistance, playerPosition.y, 0f);
+    }
+
+    private Vector3 GetInitialPlayerSpawnPosition()
+    {
+        Vector3 fallback = new Vector3((mapConfig.MinX + mapConfig.MaxX) * 0.5f, (mapConfig.MinY + mapConfig.MaxY) * 0.5f, 0f);
+        if (mapGenerator == null)
+        {
+            mapGenerator = FindAnyObjectByType<MapGenerator>();
+        }
+
+        Vector3 spawnPosition = mapGenerator != null ? mapGenerator.FindGrassSpawnPosition(fallback) : fallback;
+        spawnPosition.x = Mathf.Clamp(spawnPosition.x, mapConfig.MinX + mapConfig.SafeMargin, mapConfig.MaxX - mapConfig.SafeMargin);
+        spawnPosition.y = Mathf.Clamp(spawnPosition.y, mapConfig.MinY + mapConfig.SafeMargin, mapConfig.MaxY - mapConfig.SafeMargin);
+        spawnPosition.z = 0f;
+        return spawnPosition;
+    }
+
+    private void BeginReload()
+    {
+        reloadRemaining = Mathf.Max(0.2f, weaponProfile.ReloadDuration);
+    }
+
+    private void UpdateReload(float deltaTime)
+    {
+        if (reloadRemaining <= 0f)
+        {
+            return;
+        }
+
+        reloadRemaining = Mathf.Max(0f, reloadRemaining - deltaTime);
+        if (reloadRemaining <= 0f)
+        {
+            currentAmmo = weaponProfile.MaxAmmo;
+        }
+    }
+
+    private void BeginSettlement(bool manualSettlement)
+    {
+        if (showSettlement)
+        {
+            return;
+        }
+
+        SetPaused(true);
+        showPauseMenu = false;
+        showUpgradeChoices = false;
+        showSettlement = true;
+        if (!hasSettledRewards)
+        {
+            UserProgressRepository.AddMatchRewards(earnedGold, earnedUserExp);
+            hasSettledRewards = true;
+        }
+
+        SessionSaveRepository.ClearSavedSession();
+        SessionSaveRepository.ClearSnapshots();
+    }
+
+    private void SetPaused(bool paused)
+    {
+        isPaused = paused;
+        Time.timeScale = paused ? 0f : 1f;
+    }
+
+    private float GetRequiredExpForNextLevel(int level)
+    {
+        return inGameConfig.BaseExpToLevel + ((level - 1) * inGameConfig.ExpGrowthPerLevel);
+    }
+
+    private void CreateEnemyPool(EnemyProfile profile)
+    {
+        if (profile == null || enemyPools.ContainsKey(profile.EnemyKey))
+        {
+            return;
+        }
+
+        enemyPools[profile.EnemyKey] = new ComponentPool<EnemyActor>(() => CreateEnemyInstance(profile));
+        enemyPools[profile.EnemyKey].Warm(Mathf.Max(8, profile.PoolSize));
+    }
+
+    private Bullet CreateBulletInstance()
+    {
+        GameObject source = bulletTemplate != null ? bulletTemplate.gameObject : new GameObject("bullet");
+        GameObject instance = Instantiate(source, poolRoot);
+        instance.name = "PooledBullet";
+        Bullet bullet = instance.GetComponent<Bullet>();
+        if (bullet == null)
+        {
+            bullet = instance.AddComponent<Bullet>();
+        }
+
+        return bullet;
+    }
+
+    private ExperiencePickup CreatePickupInstance()
+    {
+        GameObject source = bulletTemplate != null ? bulletTemplate.gameObject : new GameObject("pickup");
+        GameObject instance = Instantiate(source, poolRoot);
+        instance.name = "ExperiencePickup";
+        ExperiencePickup pickup = instance.GetComponent<ExperiencePickup>();
+        if (pickup == null)
+        {
+            pickup = instance.AddComponent<ExperiencePickup>();
+        }
+
+        return pickup;
+    }
+
+    private FloatingDamageText CreateDamageTextInstance()
+    {
+        GameObject instance = new GameObject("FloatingDamageText");
+        instance.transform.SetParent(poolRoot);
+        return instance.AddComponent<FloatingDamageText>();
+    }
+
+    private EnemyActor CreateEnemyInstance(EnemyProfile profile)
+    {
+        Transform template = enemyTemplateRoot != null ? enemyTemplateRoot.Find(profile.TemplateName) : null;
+        GameObject source = template != null ? template.gameObject : new GameObject(profile.TemplateName);
+        GameObject instance = Instantiate(source, poolRoot);
+        instance.name = profile.TemplateName + "_Runtime";
+        EnemyActor actor = instance.GetComponent<EnemyActor>();
+        if (actor == null)
+        {
+            actor = instance.AddComponent<EnemyActor>();
+        }
+
+        return actor;
+    }
+
+    private void EnsurePoolRoot()
+    {
+        if (poolRoot != null)
+        {
+            return;
+        }
+
+        GameObject root = new GameObject("RuntimePools");
+        root.transform.SetParent(transform);
+        poolRoot = root.transform;
+    }
+
+    private void ReleaseBullet(Bullet bullet)
+    {
+        activeBullets.Remove(bullet);
+        bulletPool.Release(bullet);
+    }
+
+    private void ReleasePickup(ExperiencePickup pickup)
+    {
+        activePickups.Remove(pickup);
+        pickupPool.Release(pickup);
+    }
+
+    private void ReleaseEnemy(EnemyActor enemy)
+    {
+        activeEnemies.Remove(enemy);
+        if (enemyPools.TryGetValue(enemy.EnemyKey, out ComponentPool<EnemyActor> pool))
+        {
+            pool.Release(enemy);
+        }
+        else
+        {
+            enemy.gameObject.SetActive(false);
+        }
+    }
+
+    private void ReleaseAllBullets()
+    {
+        for (int index = activeBullets.Count - 1; index >= 0; index--)
+        {
+            bulletPool.Release(activeBullets[index]);
+        }
+
+        activeBullets.Clear();
+    }
+
+    private void ReleaseAllPickups()
+    {
+        for (int index = activePickups.Count - 1; index >= 0; index--)
+        {
+            pickupPool.Release(activePickups[index]);
+        }
+
+        activePickups.Clear();
+    }
+
+    private void ReleaseDamageText(FloatingDamageText damageText)
+    {
+        activeDamageTexts.Remove(damageText);
+        damageTextPool.Release(damageText);
+    }
+
+    private void ReleaseAllDamageTexts()
+    {
+        for (int index = activeDamageTexts.Count - 1; index >= 0; index--)
+        {
+            damageTextPool.Release(activeDamageTexts[index]);
+        }
+
+        activeDamageTexts.Clear();
+    }
+
+    private void ReleaseAllEnemies()
+    {
+        for (int index = activeEnemies.Count - 1; index >= 0; index--)
+        {
+            ReleaseEnemy(activeEnemies[index]);
+        }
+
+        activeEnemies.Clear();
+    }
+
+    private static bool SegmentCircleIntersects(Vector2 segmentStart, Vector2 segmentEnd, Vector2 center, float radius, out float hitT)
+    {
+        Vector2 segment = segmentEnd - segmentStart;
+        float segmentLengthSqr = segment.sqrMagnitude;
+        if (segmentLengthSqr <= 0.0001f)
+        {
+            hitT = 0f;
+            return (center - segmentStart).sqrMagnitude <= radius * radius;
+        }
+
+        hitT = Mathf.Clamp01(Vector2.Dot(center - segmentStart, segment) / segmentLengthSqr);
+        Vector2 closestPoint = segmentStart + (segment * hitT);
+        return (center - closestPoint).sqrMagnitude <= radius * radius;
+    }
+
+    public void SpawnDamageText(Vector3 worldPosition, int amount, bool isPlayerDamage)
+    {
+        if (damageTextPool == null || amount <= 0)
+        {
+            return;
+        }
+
+        FloatingDamageText damageText = damageTextPool.Get();
+        Camera camera = Camera.main != null ? Camera.main : FindAnyObjectByType<Camera>();
+        Color color = isPlayerDamage ? new Color(1f, 0.28f, 0.28f, 1f) : new Color(1f, 0.92f, 0.32f, 1f);
+        Vector3 velocity = new Vector3(Random.Range(-0.35f, 0.35f), Random.Range(1.55f, 2.25f), 0f);
+        damageText.Configure(camera, worldPosition, "-" + amount, color, isPlayerDamage ? 1.2f : 1f, velocity, isPlayerDamage ? 0.95f : 0.75f);
+        activeDamageTexts.Add(damageText);
+    }
+}
