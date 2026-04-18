@@ -4,6 +4,8 @@ public class ExperiencePickup : MonoBehaviour
 {
     private const string NormalSpritePath = "Images/Materials/Gem";
     private const string EliteSpritePath = "Images/Materials/OrangeMagicFragments";
+    private const float MagnetRadiusMultiplier = 7.6f;
+    private const float MagnetVisualDistanceMultiplier = 20f;
 
     private static Sprite cachedNormalSprite;
     private static Sprite cachedEliteSprite;
@@ -26,7 +28,7 @@ public class ExperiencePickup : MonoBehaviour
         this.owner = owner;
         this.experienceValue = Mathf.Max(0f, experienceValue);
         this.grantsFreeLevel = grantsFreeLevel;
-        moveSpeed = grantsFreeLevel ? 10f : 7f;
+        moveSpeed = grantsFreeLevel ? 14f : 10f;
         PickupRadius = grantsFreeLevel ? 1f : 0.7f;
         pulseSeed = Random.Range(0f, Mathf.PI * 2f);
         baseScale = scale;
@@ -52,23 +54,27 @@ public class ExperiencePickup : MonoBehaviour
 
         Vector2 toPlayer = playerPosition - transform.position;
         float distance = toPlayer.magnitude;
-        if (distance <= magnetRadius && distance > 0.001f)
+        float pickupTriggerDistance = PickupRadius + owner.PlayerHitRadius;
+        float visualMagnetDistance = owner.PlayerHitRadius * MagnetVisualDistanceMultiplier;
+        float attractionStartDistance = Mathf.Max(magnetRadius * MagnetRadiusMultiplier, pickupTriggerDistance + visualMagnetDistance);
+        if (distance <= attractionStartDistance && distance > 0.001f)
         {
-            float attractionRatio = 1f - Mathf.Clamp01(distance / Mathf.Max(0.01f, magnetRadius));
-            float attractionSpeed = moveSpeed + (attractionRatio * attractionRatio * (grantsFreeLevel ? 26f : 18f));
-            if (distance <= PickupRadius + owner.PlayerHitRadius + 1.25f)
+            float travelRange = Mathf.Max(0.01f, attractionStartDistance - pickupTriggerDistance);
+            float attractionRatio = 1f - Mathf.Clamp01((distance - pickupTriggerDistance) / travelRange);
+            float attractionSpeed = moveSpeed + (attractionRatio * attractionRatio * (grantsFreeLevel ? 30f : 22f));
+            if (distance <= pickupTriggerDistance + owner.PlayerHitRadius)
             {
-                attractionSpeed += grantsFreeLevel ? 10f : 7f;
+                attractionSpeed += grantsFreeLevel ? 12f : 9f;
             }
 
-            magnetAnimation = Mathf.MoveTowards(magnetAnimation, 1f, deltaTime * 4.5f);
+            magnetAnimation = Mathf.MoveTowards(magnetAnimation, 1f, deltaTime * 6f);
             transform.position = Vector3.MoveTowards(transform.position, playerPosition, attractionSpeed * deltaTime);
             float travelAngle = Mathf.Atan2(toPlayer.y, toPlayer.x) * Mathf.Rad2Deg;
             transform.rotation = Quaternion.Euler(0f, 0f, travelAngle - 90f);
         }
         else
         {
-            magnetAnimation = Mathf.MoveTowards(magnetAnimation, 0f, deltaTime * 3f);
+            magnetAnimation = Mathf.MoveTowards(magnetAnimation, 0f, deltaTime * 3.5f);
             transform.rotation = Quaternion.Euler(0f, 0f, Mathf.Sin(pulseSeed * 0.75f) * 6f);
         }
 
@@ -76,7 +82,7 @@ public class ExperiencePickup : MonoBehaviour
         float squash = Mathf.Lerp(1f, grantsFreeLevel ? 0.82f : 0.88f, magnetAnimation);
         transform.localScale = new Vector3(pulseScale * squash, pulseScale * stretch, 1f);
 
-        if (distance <= PickupRadius + owner.PlayerHitRadius)
+        if (distance <= pickupTriggerDistance)
         {
             owner.CollectPickup(this);
             return false;

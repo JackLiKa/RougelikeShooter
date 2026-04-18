@@ -7,6 +7,8 @@ public class GameGameLoop:MonoBehaviour
     void Start()
     {
         EnsureFacade();
+        GameVoiceManager.EnsureExists(gameObject);
+        GameVoiceManager.EnterGameScene();
         RoguelikeGameManager.EnsureExists(gameObject);
         RoguelikeHudCanvas.EnsureExists(gameObject);
     }

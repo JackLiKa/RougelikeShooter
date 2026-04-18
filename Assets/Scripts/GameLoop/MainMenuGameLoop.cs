@@ -7,6 +7,8 @@ public class MainMenuGameLoop:MonoBehaviour
     void Start()
     {
         EnsureFacade();
+        GameVoiceManager.EnsureExists(gameObject);
+        GameVoiceManager.EnterMainMenuScene();
     }
     void Update()
     {

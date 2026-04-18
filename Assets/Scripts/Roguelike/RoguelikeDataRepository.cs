@@ -885,6 +885,16 @@ public static class UserProgressRepository
         return state != null ? state.UpgradeLevel : 0;
     }
 
+    public static int GetPlayerUpgradeCap()
+    {
+        return Mathf.Max(1, GetProgress().Level);
+    }
+
+    public static bool IsPlayerUpgradeAtCap(PlayerType playerType)
+    {
+        return GetUpgradeLevel(playerType) >= GetPlayerUpgradeCap();
+    }
+
     public static float GetUpgradeMultiplier(PlayerType playerType)
     {
         UserConfigData config = RoguelikeDataRepository.GetUserConfig();
@@ -901,6 +911,11 @@ public static class UserProgressRepository
     public static bool TryUpgradePlayer(PlayerType playerType)
     {
         UserProgressData progress = GetProgress();
+        if (IsPlayerUpgradeAtCap(playerType))
+        {
+            return false;
+        }
+
         int cost = GetNextUpgradeCost(playerType);
         if (progress.Coins < cost)
         {

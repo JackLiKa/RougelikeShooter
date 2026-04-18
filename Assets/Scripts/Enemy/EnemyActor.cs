@@ -2,6 +2,8 @@ using UnityEngine;
 
 public class EnemyActor : MonoBehaviour
 {
+    private SpriteRenderer[] spriteRenderers;
+
     private RoguelikeGameManager owner;
     private EnemyProfile profile;
     private int maxHp;
@@ -13,14 +15,28 @@ public class EnemyActor : MonoBehaviour
     private float contactRange;
     private float attackCooldown;
     private float hitRadius;
+    private float visualHalfHeight;
     private float terrainDamageTimer;
     private bool isElite;
 
     public string EnemyKey => profile != null ? profile.EnemyKey : string.Empty;
     public int CurrentHp => currentHp;
+    public int MaxHp => maxHp;
+    public float HealthRatio => maxHp <= 0 ? 0f : (float)currentHp / maxHp;
     public bool IsElite => isElite;
     public float HitRadius => hitRadius;
+    public float UiHeadOffset => visualHalfHeight + Mathf.Max(0.75f, visualHalfHeight * 0.15f);
     public Vector2 Position => transform.position;
+
+    private void Awake()
+    {
+        CacheSpriteRenderers();
+    }
+
+    private void OnEnable()
+    {
+        CacheSpriteRenderers();
+    }
 
     public void Configure(
         RoguelikeGameManager owner,
@@ -45,8 +61,9 @@ public class EnemyActor : MonoBehaviour
         this.isElite = isElite;
         attackCooldown = 0f;
         terrainDamageTimer = 0f;
-        hitRadius = Mathf.Max(0.85f, scale * 0.12f);
         transform.localScale = new Vector3(scale, scale, 1f);
+        hitRadius = CalculateVisualHitRadius(scale);
+        visualHalfHeight = CalculateVisualHalfHeight(scale);
     }
 
     public void RestoreState(int hp)
@@ -105,5 +122,62 @@ public class EnemyActor : MonoBehaviour
         }
 
         return currentHp > 0;
+    }
+
+    private void CacheSpriteRenderers()
+    {
+        if (spriteRenderers != null && spriteRenderers.Length > 0)
+        {
+            return;
+        }
+
+        spriteRenderers = GetComponentsInChildren<SpriteRenderer>(true);
+    }
+
+    private float CalculateVisualHitRadius(float scale)
+    {
+        if (!TryGetCombinedSpriteBounds(out Bounds combinedBounds))
+        {
+            return Mathf.Max(0.85f, scale * 0.12f);
+        }
+
+        return Mathf.Max(0.85f, Mathf.Max(combinedBounds.extents.x, combinedBounds.extents.y));
+    }
+
+    private float CalculateVisualHalfHeight(float scale)
+    {
+        if (!TryGetCombinedSpriteBounds(out Bounds combinedBounds))
+        {
+            return Mathf.Max(0.85f, scale * 0.12f);
+        }
+
+        return Mathf.Max(0.85f, combinedBounds.extents.y);
+    }
+
+    private bool TryGetCombinedSpriteBounds(out Bounds combinedBounds)
+    {
+        CacheSpriteRenderers();
+
+        bool hasBounds = false;
+        combinedBounds = default;
+        for (int index = 0; index < spriteRenderers.Length; index++)
+        {
+            SpriteRenderer spriteRenderer = spriteRenderers[index];
+            if (spriteRenderer == null || !spriteRenderer.enabled || spriteRenderer.sprite == null)
+            {
+                continue;
+            }
+
+            if (!hasBounds)
+            {
+                combinedBounds = spriteRenderer.bounds;
+                hasBounds = true;
+                continue;
+            }
+
+            combinedBounds.Encapsulate(spriteRenderer.bounds);
+        }
+
+        return hasBounds;
     }
 }

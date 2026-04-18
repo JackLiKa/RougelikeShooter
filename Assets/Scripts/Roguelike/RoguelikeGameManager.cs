@@ -20,6 +20,18 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         public float HitT;
     }
 
+    private sealed class PendingBurstShot
+    {
+        public Vector3 MuzzlePosition;
+        public Vector2 Direction;
+        public int Damage;
+        public float Speed;
+        public float Lifetime;
+        public int Pierce;
+        public float Scale;
+        public float DelayRemaining;
+    }
+
     public sealed class OwnedPowerCardInfo
     {
         public PowerCardData Card;
@@ -61,6 +73,7 @@ public sealed class RoguelikeGameManager : MonoBehaviour
     private readonly Dictionary<string, ComponentPool<EnemyActor>> enemyPools = new Dictionary<string, ComponentPool<EnemyActor>>(System.StringComparer.OrdinalIgnoreCase);
     private readonly List<EnemyActor> activeEnemies = new List<EnemyActor>();
     private readonly List<Bullet> activeBullets = new List<Bullet>();
+    private readonly List<PendingBurstShot> pendingBurstShots = new List<PendingBurstShot>();
     private readonly List<ExperiencePickup> activePickups = new List<ExperiencePickup>();
     private readonly List<FloatingDamageText> activeDamageTexts = new List<FloatingDamageText>();
     private readonly List<ActiveWaveSpawn> activeWaveSpawns = new List<ActiveWaveSpawn>();
@@ -109,10 +122,25 @@ public sealed class RoguelikeGameManager : MonoBehaviour
     private bool showSettlement;
     private bool showUpgradeChoices;
     private bool showWaterEffectPrompt;
+    private bool showRewindCountdown;
     private bool isRestoringSnapshot;
     private bool hasSettledRewards;
     private bool hasShownWaterEffectPrompt;
     private bool wasPlayerInWaterLastFrame;
+    private int rewindCountdownValue;
+
+    private const float EnemySpawnDistanceMultiplier = 4f;
+    private const float EnemyBaseHpMultiplier = 2.4f;
+    private const float BurstShotDelayStep = 0.06f;
+    private const float BurstSpeedLeadMultiplier = 1.08f;
+    private const float BurstSpeedTrailMultiplier = 0.82f;
+    private const int RewindCountdownSeconds = 3;
+    private const float EnemyWaveHpScalePerWave = 0.18f;
+    private const float EnemyWaveAttackScalePerWave = 0.11f;
+    private const float EnemyWaveMoveSpeedGain = 0.09f;
+    private const float EnemyWaveAttackIntervalReduction = 0.035f;
+    private const float EnemyWaveContactRangeGain = 0.035f;
+    private const float EnemyWaveScaleGain = 0.012f;
 
     public PlayerRuntimeStats PlayerStats => playerStats;
     public float PlayerHitRadius => playerHitRadius;
@@ -139,12 +167,21 @@ public sealed class RoguelikeGameManager : MonoBehaviour
     public bool ShowSettlement => showSettlement;
     public bool ShowUpgradeChoices => showUpgradeChoices;
     public bool ShowWaterEffectPrompt => showWaterEffectPrompt;
-    public bool CanAcceptPlayerInput => initialized && !isPaused && !showPauseMenu && !showSettlement && !showUpgradeChoices && !showWaterEffectPrompt && !isRestoringSnapshot;
+    public bool ShowRewindCountdown => showRewindCountdown;
+    public int RewindCountdownValue => rewindCountdownValue;
+    public bool CanAcceptPlayerInput => initialized && !isPaused && !showPauseMenu && !showSettlement && !showUpgradeChoices && !showWaterEffectPrompt && !showRewindCountdown && !isRestoringSnapshot;
+    public IReadOnlyList<EnemyActor> ActiveEnemies => activeEnemies;
     public IReadOnlyList<PowerCardData> CurrentCardChoices => currentCardChoices;
     public IReadOnlyList<OwnedPowerCardInfo> OwnedPowerCards => ownedPowerCards;
     public int EarnedGold => earnedGold;
     public int EarnedUserExp => earnedUserExp;
     public int CurrentPlayerUpgradeLevel => UserProgressRepository.GetUpgradeLevel(GameSelectionConfig.CurrentPlayerType);
+    public Vector2 PlayerPosition => activePlayer != null ? activePlayer.position : Vector2.zero;
+    public TerrainSurfaceType CurrentPlayerTerrainType => activePlayer != null ? GetTerrainType(activePlayer.position) : TerrainSurfaceType.Ground;
+    public float MapMinX => mapConfig != null ? mapConfig.MinX : -1f;
+    public float MapMaxX => mapConfig != null ? mapConfig.MaxX : 1f;
+    public float MapMinY => mapConfig != null ? mapConfig.MinY : -1f;
+    public float MapMaxY => mapConfig != null ? mapConfig.MaxY : 1f;
 
     public bool IsInsideMapBounds(Vector2 point, float padding = 0f)
     {
@@ -212,7 +249,7 @@ public sealed class RoguelikeGameManager : MonoBehaviour
             return;
         }
 
-        if (showSettlement || isRestoringSnapshot)
+        if (showSettlement || showRewindCountdown || isRestoringSnapshot)
         {
             return;
         }
@@ -243,6 +280,7 @@ public sealed class RoguelikeGameManager : MonoBehaviour
             return;
         }
 
+        UpdatePendingBurstShots(deltaTime);
         UpdateBullets(deltaTime);
         UpdateEnemies(deltaTime);
         UpdatePickups(deltaTime);
@@ -413,9 +451,11 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         showSettlement = false;
         showUpgradeChoices = false;
         showWaterEffectPrompt = false;
+        showRewindCountdown = false;
         isRestoringSnapshot = false;
         hasShownWaterEffectPrompt = false;
         wasPlayerInWaterLastFrame = false;
+        rewindCountdownValue = 0;
         cardStacks.Clear();
         ownedPowerCards.Clear();
         currentCardChoices.Clear();
@@ -452,26 +492,42 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         int totalDamage = Mathf.Max(1, weaponProfile.Damage + playerStats.Attack + sessionBonuses.BonusAttack);
         float bulletSpeed = weaponProfile.ProjectileSpeed + sessionBonuses.BonusBulletSpeed;
         int totalPierce = Mathf.Max(0, weaponProfile.Pierce + sessionBonuses.BonusPierce);
+        Vector2 fireDirection = direction.sqrMagnitude <= 0.001f ? Vector2.right : direction.normalized;
 
         for (int burstIndex = 0; burstIndex < burstCount; burstIndex++)
         {
+            float burstDelay = burstIndex * BurstShotDelayStep;
+            float burstSpeed = bulletSpeed * GetBurstSpeedMultiplier(burstIndex, burstCount);
             for (int volleyIndex = 0; volleyIndex < volleyCount; volleyIndex++)
             {
                 float angleOffset = volleyCount == 1 ? 0f : Mathf.Lerp(-spread, spread, volleyIndex / (float)(volleyCount - 1));
                 Quaternion spreadRotation = Quaternion.Euler(0f, 0f, angleOffset);
-                Vector2 finalDirection = spreadRotation * direction.normalized;
+                Vector2 finalDirection = spreadRotation * fireDirection;
 
-                Bullet bullet = bulletPool.Get();
-                bullet.Fire(
-                    this,
-                    muzzlePosition,
-                    finalDirection,
-                    totalDamage,
-                    bulletSpeed,
-                    weaponProfile.BulletLifetime,
-                    totalPierce,
-                    weaponProfile.ProjectileScale);
-                activeBullets.Add(bullet);
+                if (burstDelay <= 0f)
+                {
+                    SpawnBullet(
+                        muzzlePosition,
+                        finalDirection,
+                        totalDamage,
+                        burstSpeed,
+                        weaponProfile.BulletLifetime,
+                        totalPierce,
+                        weaponProfile.ProjectileScale);
+                    continue;
+                }
+
+                pendingBurstShots.Add(new PendingBurstShot
+                {
+                    MuzzlePosition = muzzlePosition,
+                    Direction = finalDirection,
+                    Damage = totalDamage,
+                    Speed = burstSpeed,
+                    Lifetime = weaponProfile.BulletLifetime,
+                    Pierce = totalPierce,
+                    Scale = weaponProfile.ProjectileScale,
+                    DelayRemaining = burstDelay
+                });
             }
         }
 
@@ -587,7 +643,7 @@ public sealed class RoguelikeGameManager : MonoBehaviour
 
     public void TogglePauseMenu()
     {
-        if (!initialized || showSettlement || showUpgradeChoices || isRestoringSnapshot)
+        if (!initialized || showSettlement || showUpgradeChoices || showRewindCountdown || isRestoringSnapshot)
         {
             return;
         }
@@ -637,7 +693,7 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         }
 
         int remainingAfterRewind = Mathf.Max(0, rewindUsesRemaining - 1);
-        StartCoroutine(RestoreSnapshotRoutine(snapshot, remainingAfterRewind));
+        StartCoroutine(RewindCountdownRoutine(snapshot, remainingAfterRewind));
     }
 
     public void SaveSession()
@@ -730,6 +786,27 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         return snapshot;
     }
 
+    private IEnumerator RewindCountdownRoutine(SessionSnapshotData snapshot, int forcedRewindUsesRemaining)
+    {
+        showPauseMenu = false;
+        showUpgradeChoices = false;
+        showSettlement = false;
+        showWaterEffectPrompt = false;
+        showRewindCountdown = true;
+        rewindCountdownValue = RewindCountdownSeconds;
+        SetPaused(true);
+
+        for (int countdown = RewindCountdownSeconds; countdown >= 1; countdown--)
+        {
+            rewindCountdownValue = countdown;
+            yield return new WaitForSecondsRealtime(1f);
+        }
+
+        rewindCountdownValue = 0;
+        showRewindCountdown = false;
+        yield return StartCoroutine(RestoreSnapshotRoutine(snapshot, forcedRewindUsesRemaining));
+    }
+
     private void LoadSavedSession()
     {
         if (!SessionSaveRepository.TryLoadRequestedSession(out SessionSnapshotData snapshot))
@@ -748,6 +825,8 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         showPauseMenu = false;
         showUpgradeChoices = false;
         showSettlement = false;
+        showRewindCountdown = false;
+        rewindCountdownValue = 0;
         SetPaused(true);
 
         ReleaseAllBullets();
@@ -870,6 +949,8 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         hasShownWaterEffectPrompt = true;
         showWaterEffectPrompt = true;
         showPauseMenu = false;
+        showRewindCountdown = false;
+        GameVoiceManager.PlayFirstInWater();
         SetPaused(true);
     }
 
@@ -1158,6 +1239,8 @@ public sealed class RoguelikeGameManager : MonoBehaviour
             return;
         }
 
+        GameVoiceManager.PlayEnemyDeath(enemy.EnemyKey);
+
         if (enemy.IsElite)
         {
             SpawnPickup(enemy.transform.position, 0f, true);
@@ -1186,19 +1269,24 @@ public sealed class RoguelikeGameManager : MonoBehaviour
 
         int waveScaling = Mathf.Max(0, currentWave - 1);
         bool isElite = forceElite || profile.IsElite;
-        float hpMultiplier = isElite ? 1.75f : 1f;
+        float waveScaleFactor = 1f + (waveScaling * EnemyWaveHpScalePerWave);
+        float attackScaleFactor = 1f + (waveScaling * EnemyWaveAttackScalePerWave);
+        float hpMultiplier = (isElite ? 1.75f : 1f) * EnemyBaseHpMultiplier;
         float attackMultiplier = isElite ? 1.45f : 1f;
         float moveMultiplier = isElite ? 1.2f : 1f;
-        float scaleMultiplier = isElite ? 1.15f : 1f;
+        float scaleMultiplier = (isElite ? 1.15f : 1f) * (1f + Mathf.Min(0.3f, waveScaling * EnemyWaveScaleGain));
+        float scaledAttackInterval = Mathf.Max(0.45f, profile.AttackInterval - (waveScaling * EnemyWaveAttackIntervalReduction));
+        float scaledContactRange = profile.ContactRange + (waveScaling * EnemyWaveContactRangeGain);
+        float scaledMoveSpeed = (profile.MoveSpeed * (1f + (waveScaling * 0.03f))) + (waveScaling * EnemyWaveMoveSpeedGain);
 
         enemy.Configure(
             this,
             profile,
-            Mathf.RoundToInt((profile.MaxHp + (waveScaling * 8)) * hpMultiplier),
-            Mathf.RoundToInt((profile.Attack + waveScaling) * attackMultiplier),
-            (profile.MoveSpeed + (waveScaling * 0.05f)) * moveMultiplier,
-            profile.AttackInterval,
-            profile.ContactRange,
+            Mathf.RoundToInt(((profile.MaxHp * waveScaleFactor) + (waveScaling * 14f)) * hpMultiplier),
+            Mathf.RoundToInt(((profile.Attack + (waveScaling * 2f)) * attackScaleFactor) * attackMultiplier),
+            scaledMoveSpeed * moveMultiplier,
+            scaledAttackInterval,
+            scaledContactRange,
             profile.Scale * scaleMultiplier,
             isElite);
 
@@ -1209,6 +1297,8 @@ public sealed class RoguelikeGameManager : MonoBehaviour
     private Vector3 GetSpawnPositionAroundPlayer()
     {
         Vector3 playerPosition = activePlayer.position;
+        float minDistance = Mathf.Max(0.5f, inGameConfig.SpawnMinDistance * EnemySpawnDistanceMultiplier);
+        float maxDistance = Mathf.Max(minDistance + 0.5f, inGameConfig.SpawnMaxDistance * EnemySpawnDistanceMultiplier);
         for (int attempt = 0; attempt < 12; attempt++)
         {
             Vector2 direction = Random.insideUnitCircle.normalized;
@@ -1217,19 +1307,22 @@ public sealed class RoguelikeGameManager : MonoBehaviour
                 direction = Vector2.right;
             }
 
-            float distance = Random.Range(inGameConfig.SpawnMinDistance, inGameConfig.SpawnMaxDistance);
+            float distance = Random.Range(minDistance, maxDistance);
             Vector3 position = playerPosition + (Vector3)(direction * distance);
             position.x = Mathf.Clamp(position.x, mapConfig.MinX + mapConfig.SafeMargin, mapConfig.MaxX - mapConfig.SafeMargin);
             position.y = Mathf.Clamp(position.y, mapConfig.MinY + mapConfig.SafeMargin, mapConfig.MaxY - mapConfig.SafeMargin);
 
             float actualDistance = Vector2.Distance(position, playerPosition);
-            if (actualDistance >= inGameConfig.SpawnMinDistance - 0.5f && actualDistance <= inGameConfig.SpawnMaxDistance + 0.5f)
+            if (actualDistance >= minDistance - 0.5f && actualDistance <= maxDistance + 0.5f)
             {
                 return position;
             }
         }
 
-        return new Vector3(playerPosition.x + inGameConfig.SpawnMinDistance, playerPosition.y, 0f);
+        Vector3 fallback = new Vector3(playerPosition.x + minDistance, playerPosition.y, 0f);
+        fallback.x = Mathf.Clamp(fallback.x, mapConfig.MinX + mapConfig.SafeMargin, mapConfig.MaxX - mapConfig.SafeMargin);
+        fallback.y = Mathf.Clamp(fallback.y, mapConfig.MinY + mapConfig.SafeMargin, mapConfig.MaxY - mapConfig.SafeMargin);
+        return fallback;
     }
 
     private Vector3 GetInitialPlayerSpawnPosition()
@@ -1398,6 +1491,8 @@ public sealed class RoguelikeGameManager : MonoBehaviour
 
     private void ReleaseAllBullets()
     {
+        pendingBurstShots.Clear();
+
         for (int index = activeBullets.Count - 1; index >= 0; index--)
         {
             bulletPool.Release(activeBullets[index]);
@@ -1440,6 +1535,62 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         }
 
         activeEnemies.Clear();
+    }
+
+    private void UpdatePendingBurstShots(float deltaTime)
+    {
+        for (int index = pendingBurstShots.Count - 1; index >= 0; index--)
+        {
+            PendingBurstShot shot = pendingBurstShots[index];
+            shot.DelayRemaining -= deltaTime;
+            if (shot.DelayRemaining > 0f)
+            {
+                continue;
+            }
+
+            SpawnBullet(
+                shot.MuzzlePosition,
+                shot.Direction,
+                shot.Damage,
+                shot.Speed,
+                shot.Lifetime,
+                shot.Pierce,
+                shot.Scale);
+            pendingBurstShots.RemoveAt(index);
+        }
+    }
+
+    private void SpawnBullet(
+        Vector3 muzzlePosition,
+        Vector2 direction,
+        int damage,
+        float speed,
+        float lifetime,
+        int pierce,
+        float scale)
+    {
+        Bullet bullet = bulletPool.Get();
+        bullet.Fire(
+            this,
+            muzzlePosition,
+            direction,
+            damage,
+            speed,
+            lifetime,
+            pierce,
+            scale);
+        activeBullets.Add(bullet);
+    }
+
+    private static float GetBurstSpeedMultiplier(int burstIndex, int burstCount)
+    {
+        if (burstCount <= 1)
+        {
+            return 1f;
+        }
+
+        float t = burstIndex / (float)(burstCount - 1);
+        return Mathf.Lerp(BurstSpeedLeadMultiplier, BurstSpeedTrailMultiplier, t);
     }
 
     private static bool SegmentCircleIntersects(Vector2 segmentStart, Vector2 segmentEnd, Vector2 center, float radius, out float hitT)

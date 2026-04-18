@@ -8,6 +8,8 @@ public class CharacterPanelGameLoop : MonoBehaviour
     void Start()
     {
         EnsureFacade();
+        GameVoiceManager.EnsureExists(gameObject);
+        GameVoiceManager.EnterCharacterPanelScene();
     }
 
     void Update()

@@ -5,6 +5,20 @@ using UnityEngine.UI;
 
 public sealed class RoguelikeHudCanvas : MonoBehaviour
 {
+    private sealed class MinimapDot
+    {
+        public RectTransform Rect;
+        public Image Image;
+    }
+
+    private sealed class EnemyHealthBar
+    {
+        public RectTransform Root;
+        public RectTransform BackgroundRect;
+        public Image FillImage;
+        public Text ValueText;
+    }
+
     private const int MaxCardSlots = 3;
 
     private static readonly Color CardBackground = new Color(0.07f, 0.1f, 0.14f, 0.88f);
@@ -15,6 +29,11 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
     private static readonly Color HpBarColor = new Color(0.91f, 0.28f, 0.34f, 1f);
     private static readonly Color ExpBarColor = new Color(0.3f, 0.83f, 0.48f, 1f);
     private static readonly Color BarBackground = new Color(0.15f, 0.2f, 0.25f, 1f);
+    private static readonly Color MinimapBackground = new Color(0.04f, 0.06f, 0.09f, 0.98f);
+    private static readonly Color MinimapGridColor = new Color(0.27f, 0.36f, 0.46f, 0.78f);
+    private static readonly Color PlayerDotColor = new Color(0.22f, 0.9f, 0.42f, 1f);
+    private static readonly Color EnemyDotColor = new Color(0.94f, 0.28f, 0.28f, 1f);
+    private static readonly Color EliteEnemyDotColor = new Color(0.72f, 0.34f, 0.94f, 1f);
     private static readonly Vector2 ReferenceResolution = new Vector2(1920f, 1080f);
 
     private readonly List<GameObject> cardRoots = new List<GameObject>(MaxCardSlots);
@@ -22,15 +41,22 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
     private readonly List<Text> cardDescriptionTexts = new List<Text>(MaxCardSlots);
     private readonly List<Text> cardStackTexts = new List<Text>(MaxCardSlots);
     private readonly List<Text> cardSummaryTexts = new List<Text>(MaxCardSlots);
+    private readonly Dictionary<int, MinimapDot> enemyMinimapDots = new Dictionary<int, MinimapDot>();
+    private readonly Dictionary<int, EnemyHealthBar> enemyHealthBars = new Dictionary<int, EnemyHealthBar>();
+    private readonly HashSet<int> activeEnemyIds = new HashSet<int>();
+    private readonly List<int> staleEnemyIds = new List<int>();
 
     private Canvas canvas;
     private Font font;
+    private Camera worldCamera;
+    private RectTransform rootRect;
 
     private GameObject pauseOverlay;
     private GameObject upgradeOverlay;
     private GameObject inventoryOverlay;
     private GameObject settlementOverlay;
     private GameObject waterOverlay;
+    private GameObject rewindOverlay;
 
     private Text playerNameText;
     private Text hpValueText;
@@ -59,6 +85,12 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
     private Text settlementCoinsText;
     private Text inventoryCardsText;
     private Text waterBodyText;
+    private Text rewindCountdownText;
+    private Text terrainNameText;
+    private Text terrainEffectText;
+    private RectTransform minimapArea;
+    private Image minimapPlayerDot;
+    private RectTransform enemyBarLayer;
 
     public static RoguelikeHudCanvas EnsureExists(GameObject host)
     {
@@ -109,23 +141,24 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
 
         EnsureEventSystem();
 
-        RectTransform root = GetComponent<RectTransform>();
-        if (root == null)
+        rootRect = GetComponent<RectTransform>();
+        if (rootRect == null)
         {
-            root = gameObject.AddComponent<RectTransform>();
+            rootRect = gameObject.AddComponent<RectTransform>();
         }
 
-        root.anchorMin = Vector2.zero;
-        root.anchorMax = Vector2.one;
-        root.offsetMin = Vector2.zero;
-        root.offsetMax = Vector2.zero;
+        rootRect.anchorMin = Vector2.zero;
+        rootRect.anchorMax = Vector2.one;
+        rootRect.offsetMin = Vector2.zero;
+        rootRect.offsetMax = Vector2.zero;
 
-        BuildHudPanels(root);
-        BuildPauseOverlay(root);
-        BuildUpgradeOverlay(root);
-        BuildInventoryOverlay(root);
-        BuildSettlementOverlay(root);
-        BuildWaterOverlay(root);
+        BuildHudPanels(rootRect);
+        BuildPauseOverlay(rootRect);
+        BuildUpgradeOverlay(rootRect);
+        BuildInventoryOverlay(rootRect);
+        BuildSettlementOverlay(rootRect);
+        BuildWaterOverlay(rootRect);
+        BuildRewindOverlay(rootRect);
     }
 
     private void RefreshView()
@@ -166,16 +199,22 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
         expHintText.text = $"\u7ecf\u9a8c\u503c {session.CurrentExp:0}/{session.ExpToNextLevel:0}    \u6309 R \u952e\u56de\u6eaf\u5230\u6700\u8fd1\u5feb\u7167";
         reloadHintText.text = session.IsReloading ? $"\u6362\u5f39\u4e2d {session.ReloadRemaining:0.0} \u79d2" : string.Empty;
 
-        SetVisible(pauseOverlay, session.ShowPauseMenu);
-        SetVisible(upgradeOverlay, session.ShowUpgradeChoices);
-        SetVisible(inventoryOverlay, !session.ShowPauseMenu && !session.ShowUpgradeChoices && !session.ShowSettlement && !session.ShowWaterEffectPrompt && Input.GetKey(KeyCode.Tab));
-        SetVisible(settlementOverlay, session.ShowSettlement);
-        SetVisible(waterOverlay, session.ShowWaterEffectPrompt);
+        SetVisible(pauseOverlay, session.ShowPauseMenu && !session.ShowRewindCountdown);
+        SetVisible(upgradeOverlay, session.ShowUpgradeChoices && !session.ShowRewindCountdown);
+        SetVisible(inventoryOverlay, !session.ShowPauseMenu && !session.ShowUpgradeChoices && !session.ShowSettlement && !session.ShowWaterEffectPrompt && !session.ShowRewindCountdown && Input.GetKey(KeyCode.Tab));
+        SetVisible(settlementOverlay, session.ShowSettlement && !session.ShowRewindCountdown);
+        SetVisible(waterOverlay, session.ShowWaterEffectPrompt && !session.ShowRewindCountdown);
+        SetVisible(rewindOverlay, session.ShowRewindCountdown);
+        if (session.ShowRewindCountdown && rewindCountdownText != null)
+        {
+            rewindCountdownText.text = session.RewindCountdownValue > 0 ? session.RewindCountdownValue.ToString() : string.Empty;
+        }
 
         RefreshUpgradeCards(session);
         RefreshInventory(session);
         RefreshSettlement(session);
         RefreshWaterOverlay();
+        RefreshCombatOverlay(session);
     }
 
     private void RefreshUpgradeCards(RoguelikeGameManager session)
@@ -257,6 +296,284 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
         waterBodyText.text = "\u4f60\u5df2\u7b2c\u4e00\u6b21\u8e29\u5165\u6c34\u57df\u3002\n\n\u6c34\u9762\u6548\u679c\uff1a\n1. \u89d2\u8272\u4f1a\u6bcf\u79d2\u53d7\u5230 1 \u70b9\u4f24\u5bb3\u3002\n2. \u602a\u7269\u8e29\u5728\u6c34\u91cc\u4e5f\u4f1a\u6bcf\u79d2\u6389 1 \u70b9\u751f\u547d\u3002\n3. \u89d2\u8272\u548c\u602a\u7269\u7684\u79fb\u52a8\u901f\u5ea6\u90fd\u4f1a\u964d\u4f4e 2 \u70b9\u3002\n\n\u6309\u4efb\u610f\u952e\u5173\u95ed\u63d0\u793a\uff0c\u5e76\u7ee7\u7eed\u5f53\u524d\u5bf9\u5c40\u3002";
     }
 
+    private void RefreshTerrainInfo(RoguelikeGameManager session)
+    {
+        if (terrainNameText == null || terrainEffectText == null)
+        {
+            return;
+        }
+
+        switch (session.CurrentPlayerTerrainType)
+        {
+            case TerrainSurfaceType.Grass:
+                terrainNameText.text = "\u5f53\u524d\u5730\u5f62\uff1a\u8349\u5730";
+                terrainEffectText.text = "\u589e\u76ca\uff1a\u79fb\u901f +2\uff0c\u7a7f\u8349\u5730\u53ef\u4ee5\u66f4\u5feb\u62c9\u5f00\u8ddd\u79bb";
+                break;
+            case TerrainSurfaceType.Water:
+                terrainNameText.text = "\u5f53\u524d\u5730\u5f62\uff1a\u6c34\u57df";
+                terrainEffectText.text = "\u6548\u679c\uff1a\u79fb\u901f -2\uff0c\u6bcf\u79d2\u6389 1 \u8840\uff0c\u602a\u5728\u6c34\u91cc\u4e5f\u4f1a\u6389\u8840";
+                break;
+            default:
+                terrainNameText.text = "\u5f53\u524d\u5730\u5f62\uff1a\u5e73\u5730";
+                terrainEffectText.text = "\u6548\u679c\uff1a\u65e0\u989d\u5916\u5730\u5f62\u589e\u76ca\u6216\u60e9\u7f5a";
+                break;
+        }
+    }
+
+    private void RefreshCombatOverlay(RoguelikeGameManager session)
+    {
+        if (minimapArea == null || enemyBarLayer == null)
+        {
+            return;
+        }
+
+        RefreshWorldCamera();
+        RefreshTerrainInfo(session);
+        UpdateMinimapPlayerDot(session);
+
+        activeEnemyIds.Clear();
+        IReadOnlyList<EnemyActor> enemies = session.ActiveEnemies;
+        for (int index = 0; index < enemies.Count; index++)
+        {
+            EnemyActor enemy = enemies[index];
+            if (enemy == null || !enemy.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            int enemyId = enemy.GetInstanceID();
+            activeEnemyIds.Add(enemyId);
+            UpdateMinimapEnemyDot(session, enemy, enemyId);
+            UpdateEnemyHealthBar(enemy, enemyId);
+        }
+
+        CleanupStaleEnemyUi();
+    }
+
+    private void RefreshWorldCamera()
+    {
+        if (worldCamera != null && worldCamera.isActiveAndEnabled)
+        {
+            return;
+        }
+
+        worldCamera = Camera.main;
+        if (worldCamera == null)
+        {
+            worldCamera = FindAnyObjectByType<Camera>();
+        }
+    }
+
+    private void UpdateMinimapPlayerDot(RoguelikeGameManager session)
+    {
+        if (minimapPlayerDot == null)
+        {
+            return;
+        }
+
+        minimapPlayerDot.rectTransform.anchoredPosition = WorldToMinimapPosition(session, session.PlayerPosition);
+    }
+
+    private void UpdateMinimapEnemyDot(RoguelikeGameManager session, EnemyActor enemy, int enemyId)
+    {
+        MinimapDot dot = GetOrCreateEnemyDot(enemyId);
+        dot.Image.color = enemy.IsElite ? EliteEnemyDotColor : EnemyDotColor;
+        dot.Rect.anchoredPosition = WorldToMinimapPosition(session, enemy.Position);
+        if (!dot.Rect.gameObject.activeSelf)
+        {
+            dot.Rect.gameObject.SetActive(true);
+        }
+    }
+
+    private void UpdateEnemyHealthBar(EnemyActor enemy, int enemyId)
+    {
+        EnemyHealthBar bar = GetOrCreateEnemyHealthBar(enemyId, enemy.IsElite);
+        bar.BackgroundRect.sizeDelta = new Vector2(enemy.IsElite ? 120f : 96f, 16f);
+        bar.FillImage.fillAmount = enemy.HealthRatio;
+        bar.ValueText.text = $"{enemy.CurrentHp}/{enemy.MaxHp}";
+
+        bool isVisible = TryGetScreenPosition(enemy.Position + (Vector2.up * enemy.UiHeadOffset), out Vector2 localPoint);
+        if (!bar.Root.gameObject.activeSelf && isVisible)
+        {
+            bar.Root.gameObject.SetActive(true);
+        }
+
+        if (!isVisible)
+        {
+            if (bar.Root.gameObject.activeSelf)
+            {
+                bar.Root.gameObject.SetActive(false);
+            }
+
+            return;
+        }
+
+        bar.Root.anchoredPosition = localPoint;
+    }
+
+    private bool TryGetScreenPosition(Vector2 worldPosition, out Vector2 localPoint)
+    {
+        localPoint = Vector2.zero;
+        if (rootRect == null || worldCamera == null)
+        {
+            return false;
+        }
+
+        Vector3 screenPosition = worldCamera.WorldToScreenPoint(worldPosition);
+        if (screenPosition.z <= 0f
+            || screenPosition.x < -64f
+            || screenPosition.x > Screen.width + 64f
+            || screenPosition.y < -64f
+            || screenPosition.y > Screen.height + 64f)
+        {
+            return false;
+        }
+
+        return RectTransformUtility.ScreenPointToLocalPointInRectangle(rootRect, screenPosition, null, out localPoint);
+    }
+
+    private Vector2 WorldToMinimapPosition(RoguelikeGameManager session, Vector2 worldPosition)
+    {
+        if (minimapArea == null)
+        {
+            return Vector2.zero;
+        }
+
+        float minX = session.MapMinX;
+        float maxX = session.MapMaxX;
+        float minY = session.MapMinY;
+        float maxY = session.MapMaxY;
+
+        float normalizedX;
+        float normalizedY;
+        if (maxX - minX <= 0.01f || maxY - minY <= 0.01f)
+        {
+            Vector2 playerPosition = session.PlayerPosition;
+            normalizedX = 0.5f + ((worldPosition.x - playerPosition.x) * 0.03f);
+            normalizedY = 0.5f + ((worldPosition.y - playerPosition.y) * 0.03f);
+        }
+        else
+        {
+            normalizedX = Mathf.InverseLerp(minX, maxX, worldPosition.x);
+            normalizedY = Mathf.InverseLerp(minY, maxY, worldPosition.y);
+        }
+
+        normalizedX = Mathf.Clamp01(normalizedX);
+        normalizedY = Mathf.Clamp01(normalizedY);
+
+        Rect rect = minimapArea.rect;
+        float padding = 8f;
+        float localX = Mathf.Lerp(-rect.width * 0.5f + padding, rect.width * 0.5f - padding, normalizedX);
+        float localY = Mathf.Lerp(-rect.height * 0.5f + padding, rect.height * 0.5f - padding, normalizedY);
+        return new Vector2(localX, localY);
+    }
+
+    private MinimapDot GetOrCreateEnemyDot(int enemyId)
+    {
+        if (enemyMinimapDots.TryGetValue(enemyId, out MinimapDot dot))
+        {
+            return dot;
+        }
+
+        Image dotImage = CreateDot(minimapArea, "EnemyDot_" + enemyId, 7f, EnemyDotColor);
+        dot = new MinimapDot
+        {
+            Rect = dotImage.rectTransform,
+            Image = dotImage
+        };
+        enemyMinimapDots[enemyId] = dot;
+        return dot;
+    }
+
+    private EnemyHealthBar GetOrCreateEnemyHealthBar(int enemyId, bool isElite)
+    {
+        if (enemyHealthBars.TryGetValue(enemyId, out EnemyHealthBar bar))
+        {
+            return bar;
+        }
+
+        GameObject rootObject = new GameObject("EnemyHealthBar_" + enemyId, typeof(RectTransform));
+        rootObject.transform.SetParent(enemyBarLayer, false);
+        RectTransform barRoot = rootObject.GetComponent<RectTransform>();
+        barRoot.anchorMin = new Vector2(0.5f, 0.5f);
+        barRoot.anchorMax = new Vector2(0.5f, 0.5f);
+        barRoot.pivot = new Vector2(0.5f, 0.5f);
+        barRoot.sizeDelta = new Vector2(132f, 22f);
+
+        RectTransform backgroundRect = CreateColoredRect(barRoot, "BarBackground", new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(isElite ? 120f : 96f, 16f), Vector2.zero, BarBackground);
+        AddOutline(backgroundRect.gameObject, isElite ? EliteEnemyDotColor : CardBorder, new Vector2(1f, -1f));
+
+        RectTransform fillRect = CreateColoredRect(backgroundRect, "BarFill", Vector2.zero, Vector2.one, new Vector2(0.5f, 0.5f), Vector2.zero, Vector2.zero, HpBarColor);
+        fillRect.offsetMin = Vector2.zero;
+        fillRect.offsetMax = Vector2.zero;
+        Image fillImage = fillRect.GetComponent<Image>();
+        fillImage.type = Image.Type.Filled;
+        fillImage.fillMethod = Image.FillMethod.Horizontal;
+        fillImage.fillOrigin = 0;
+        fillImage.fillAmount = 1f;
+
+        Text valueText = CreateText(barRoot, "HpValue", 12, FontStyle.Bold, TextAnchor.MiddleCenter, Color.white, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(132f, 22f));
+
+        bar = new EnemyHealthBar
+        {
+            Root = barRoot,
+            BackgroundRect = backgroundRect,
+            FillImage = fillImage,
+            ValueText = valueText
+        };
+        enemyHealthBars[enemyId] = bar;
+        return bar;
+    }
+
+    private void CleanupStaleEnemyUi()
+    {
+        staleEnemyIds.Clear();
+
+        foreach (KeyValuePair<int, MinimapDot> pair in enemyMinimapDots)
+        {
+            if (!activeEnemyIds.Contains(pair.Key))
+            {
+                staleEnemyIds.Add(pair.Key);
+            }
+        }
+
+        foreach (KeyValuePair<int, EnemyHealthBar> pair in enemyHealthBars)
+        {
+            if (!activeEnemyIds.Contains(pair.Key) && !staleEnemyIds.Contains(pair.Key))
+            {
+                staleEnemyIds.Add(pair.Key);
+            }
+        }
+
+        for (int index = 0; index < staleEnemyIds.Count; index++)
+        {
+            ReleaseEnemyUi(staleEnemyIds[index]);
+        }
+    }
+
+    private void ReleaseEnemyUi(int enemyId)
+    {
+        if (enemyMinimapDots.TryGetValue(enemyId, out MinimapDot dot))
+        {
+            if (dot.Rect != null)
+            {
+                Destroy(dot.Rect.gameObject);
+            }
+
+            enemyMinimapDots.Remove(enemyId);
+        }
+
+        if (enemyHealthBars.TryGetValue(enemyId, out EnemyHealthBar bar))
+        {
+            if (bar.Root != null)
+            {
+                Destroy(bar.Root.gameObject);
+            }
+
+            enemyHealthBars.Remove(enemyId);
+        }
+    }
+
     private void BuildHudPanels(RectTransform root)
     {
         RectTransform playerPanel = CreatePanel(root, "PlayerPanel", new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(360f, 194f), new Vector2(18f, -18f));
@@ -286,6 +603,22 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
         CreateBar(progressPanel, new Vector2(18f, -44f), new Vector2(424f, 18f), ExpBarColor, out expFillImage);
         expHintText = CreateText(progressPanel, "ExpHint", 13, FontStyle.Normal, TextAnchor.UpperLeft, SoftText, new Vector2(18f, -66f), new Vector2(424f, 18f));
         reloadHintText = CreateText(progressPanel, "ReloadHint", 12, FontStyle.Bold, TextAnchor.UpperLeft, Accent, new Vector2(18f, -84f), new Vector2(424f, 16f));
+
+        RectTransform terrainPanel = CreatePanel(root, "TerrainPanel", new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(360f, 94f), new Vector2(18f, -226f));
+        CreateText(terrainPanel, "TerrainTitle", 15, FontStyle.Bold, TextAnchor.UpperLeft, Accent, new Vector2(18f, -12f), new Vector2(324f, 18f)).text = "\u5730\u5f62\u589e\u76ca";
+        terrainNameText = CreateText(terrainPanel, "TerrainName", 18, FontStyle.Bold, TextAnchor.UpperLeft, Color.white, new Vector2(18f, -38f), new Vector2(324f, 22f));
+        terrainEffectText = CreateText(terrainPanel, "TerrainEffect", 13, FontStyle.Normal, TextAnchor.UpperLeft, SoftText, new Vector2(18f, -64f), new Vector2(324f, 24f));
+
+        RectTransform minimapPanel = CreatePanel(root, "MinimapPanel", new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(380f, 304f), new Vector2(-18f, 18f));
+        CreateText(minimapPanel, "MinimapTitle", 18, FontStyle.Bold, TextAnchor.UpperLeft, Color.white, new Vector2(18f, -12f), new Vector2(224f, 20f)).text = "\u6218\u573a\u5730\u56fe";
+        minimapArea = CreateColoredRect(minimapPanel, "MinimapArea", new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(344f, 220f), new Vector2(18f, -44f), MinimapBackground);
+        AddOutline(minimapArea.gameObject, CardBorder, new Vector2(1f, -1f));
+        CreateColoredRect(minimapArea, "HorizontalAxis", new Vector2(0f, 0.5f), new Vector2(1f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, 1f), Vector2.zero, MinimapGridColor);
+        CreateColoredRect(minimapArea, "VerticalAxis", new Vector2(0.5f, 0f), new Vector2(0.5f, 1f), new Vector2(0.5f, 0.5f), new Vector2(1f, 0f), Vector2.zero, MinimapGridColor);
+        minimapPlayerDot = CreateDot(minimapArea, "PlayerDot", 10f, PlayerDotColor);
+        CreateText(minimapPanel, "MinimapLegend", 12, FontStyle.Normal, TextAnchor.UpperLeft, SoftText, new Vector2(18f, -274f), new Vector2(328f, 14f)).text = "\u7eff\u8272 Player   \u7ea2\u8272\u602a\u7269   \u7d2b\u8272\u7cbe\u82f1";
+
+        enemyBarLayer = CreateStretchRect(root, "EnemyBarLayer");
     }
 
     private void BuildPauseOverlay(RectTransform root)
@@ -377,6 +710,17 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
         waterOverlay.SetActive(false);
     }
 
+    private void BuildRewindOverlay(RectTransform root)
+    {
+        rewindOverlay = CreateOverlay(root, "RewindOverlay");
+        RectTransform overlayRect = rewindOverlay.transform as RectTransform;
+        CreateText(overlayRect, "RewindTitle", 34, FontStyle.Bold, TextAnchor.MiddleCenter, new Color(0.78f, 0.78f, 0.78f, 0.96f), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, 120f), new Vector2(560f, 40f)).text = "\u56de\u6eaf\u51c6\u5907\u4e2d";
+        rewindCountdownText = CreateText(overlayRect, "RewindCountdown", 240, FontStyle.Bold, TextAnchor.MiddleCenter, new Color(0.68f, 0.68f, 0.68f, 1f), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -10f), new Vector2(420f, 260f));
+        AddOutline(rewindCountdownText.gameObject, new Color(0f, 0f, 0f, 0.55f), new Vector2(2f, -2f));
+        CreateText(overlayRect, "RewindHint", 18, FontStyle.Normal, TextAnchor.MiddleCenter, new Color(0.72f, 0.72f, 0.72f, 0.9f), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -150f), new Vector2(620f, 24f)).text = "\u5012\u8ba1\u65f6\u7ed3\u675f\u540e\u5c06\u81ea\u52a8\u56de\u5230\u6700\u8fd1\u5feb\u7167";
+        rewindOverlay.SetActive(false);
+    }
+
     private RectTransform CreatePanel(Transform parent, string name, Vector2 anchorMin, Vector2 anchorMax, Vector2 pivot, Vector2 size, Vector2 anchoredPosition)
     {
         GameObject panelObject = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(Outline));
@@ -407,6 +751,64 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
         accent.GetComponent<Image>().color = Accent;
 
         return rect;
+    }
+
+    private RectTransform CreateStretchRect(Transform parent, string name)
+    {
+        GameObject rectObject = new GameObject(name, typeof(RectTransform));
+        rectObject.transform.SetParent(parent, false);
+
+        RectTransform rect = rectObject.GetComponent<RectTransform>();
+        rect.anchorMin = Vector2.zero;
+        rect.anchorMax = Vector2.one;
+        rect.offsetMin = Vector2.zero;
+        rect.offsetMax = Vector2.zero;
+        rectObject.layer = gameObject.layer;
+        return rect;
+    }
+
+    private RectTransform CreateColoredRect(Transform parent, string name, Vector2 anchorMin, Vector2 anchorMax, Vector2 pivot, Vector2 size, Vector2 anchoredPosition, Color color)
+    {
+        GameObject rectObject = new GameObject(name, typeof(RectTransform), typeof(Image));
+        rectObject.transform.SetParent(parent, false);
+
+        RectTransform rect = rectObject.GetComponent<RectTransform>();
+        rect.anchorMin = anchorMin;
+        rect.anchorMax = anchorMax;
+        rect.pivot = pivot;
+        rect.sizeDelta = size;
+        rect.anchoredPosition = anchoredPosition;
+
+        Image image = rectObject.GetComponent<Image>();
+        image.color = color;
+        image.raycastTarget = false;
+        rectObject.layer = gameObject.layer;
+        return rect;
+    }
+
+    private Image CreateDot(Transform parent, string name, float size, Color color)
+    {
+        RectTransform rect = CreateColoredRect(parent, name, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(size, size), Vector2.zero, color);
+        Image image = rect.GetComponent<Image>();
+        image.raycastTarget = false;
+        return image;
+    }
+
+    private static void AddOutline(GameObject target, Color color, Vector2 effectDistance)
+    {
+        Outline outline = target.GetComponent<Outline>();
+        if (outline == null)
+        {
+            outline = target.AddComponent<Outline>();
+        }
+
+        outline.effectColor = color;
+        outline.effectDistance = effectDistance;
+        Graphic graphic = target.GetComponent<Graphic>();
+        if (graphic != null)
+        {
+            graphic.raycastTarget = false;
+        }
     }
 
     private void CreateBar(RectTransform parent, Vector2 anchoredPosition, Vector2 size, Color fillColor, out Image fillImage)

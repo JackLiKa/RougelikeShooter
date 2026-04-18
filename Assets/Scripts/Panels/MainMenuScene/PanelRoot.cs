@@ -83,8 +83,8 @@ public class PanelRoot : IPanel
 
     private void DrawTitleCard()
     {
-        GUI.Label(new Rect(96f, 58f, 620f, 48f), "\u8089\u9e3d\u5c04\u51fb\u8bd5\u70bc", CreateLabelStyle(36, FontStyle.Bold, TextAnchor.UpperLeft, Color.white));
-        GUI.Label(new Rect(100f, 110f, 760f, 26f), "\u9009\u62e9\u89d2\u8272\u548c\u6b66\u5668\u540e\u8fdb\u5165\u6218\u573a\uff0c\u5728\u5bf9\u5c40\u91cc\u5373\u65f6\u6210\u957f\uff0c\u5728\u5c40\u5916\u6301\u7eed\u5f3a\u5316\u3002", CreateLabelStyle(17, FontStyle.Normal, TextAnchor.UpperLeft, SoftText));
+        DrawCompatibleLabel(new Rect(96f, 58f, 620f, 48f), "\u8089\u9e3d\u5c04\u51fb\u8bd5\u70bc", CreateLabelStyle(36, FontStyle.Bold, TextAnchor.UpperLeft, Color.white));
+        DrawCompatibleLabel(new Rect(100f, 110f, 760f, 26f), "\u9009\u62e9\u89d2\u8272\u548c\u6b66\u5668\u540e\u8fdb\u5165\u6218\u573a\uff0c\u5728\u5bf9\u5c40\u91cc\u5373\u65f6\u6210\u957f\uff0c\u5728\u5c40\u5916\u6301\u7eed\u5f3a\u5316\u3002", CreateLabelStyle(17, FontStyle.Normal, TextAnchor.UpperLeft, SoftText));
     }
 
     private void DrawMenuCard(Rect rect)
@@ -133,8 +133,8 @@ public class PanelRoot : IPanel
         Rect footerRect = new Rect(rect.x + 18f, rect.y + rect.height - 64f, rect.width - 36f, 44f);
         DrawFilledRect(footerRect, new Color(0.05f, 0.08f, 0.11f, 0.96f));
         DrawBorder(footerRect, CardBorder, 1.5f);
-        GUI.Label(new Rect(footerRect.x + 12f, footerRect.y + 6f, footerRect.width - 24f, 16f), $"\u5f53\u524d\u89d2\u8272\uff1a{GameSelectionConfig.GetPlayerDisplayName(GameSelectionConfig.CurrentPlayerType)}", CreateLabelStyle(14, FontStyle.Bold, TextAnchor.UpperLeft, Accent));
-        GUI.Label(new Rect(footerRect.x + 12f, footerRect.y + 24f, footerRect.width - 24f, 14f), $"\u5f53\u524d\u6b66\u5668\uff1a{GameSelectionConfig.GetWeaponDisplayName(GameSelectionConfig.CurrentWeaponType)}", CreateLabelStyle(13, FontStyle.Normal, TextAnchor.UpperLeft, SoftText));
+        DrawCompatibleLabel(new Rect(footerRect.x + 12f, footerRect.y + 6f, footerRect.width - 24f, 16f), $"\u5f53\u524d\u89d2\u8272\uff1a{GameSelectionConfig.GetPlayerDisplayName(GameSelectionConfig.CurrentPlayerType)}", CreateLabelStyle(14, FontStyle.Bold, TextAnchor.UpperLeft, Accent));
+        DrawCompatibleLabel(new Rect(footerRect.x + 12f, footerRect.y + 24f, footerRect.width - 24f, 14f), $"\u5f53\u524d\u6b66\u5668\uff1a{GameSelectionConfig.GetWeaponDisplayName(GameSelectionConfig.CurrentWeaponType)}", CreateLabelStyle(13, FontStyle.Normal, TextAnchor.UpperLeft, SoftText));
     }
 
     private void DrawPreviewCard(Rect rect)
@@ -155,7 +155,7 @@ public class PanelRoot : IPanel
         DrawWeaponPreview(previewRect);
         Rect captionRect = new Rect(previewRect.x + 14f, previewRect.yMax - 44f, previewRect.width - 28f, 26f);
         DrawFilledRect(captionRect, new Color(0f, 0f, 0f, 0.5f));
-        GUI.Label(new Rect(captionRect.x + 8f, captionRect.y + 5f, captionRect.width - 16f, 16f), "\u5de6\u4e0b\u9884\u89c8\u5f53\u524d Player \u4e0e\u624b\u6301\u6b66\u5668\u7684 Idle \u52a8\u753b", CreateLabelStyle(12, FontStyle.Normal, TextAnchor.MiddleLeft, SoftText));
+        DrawCompatibleLabel(new Rect(captionRect.x + 8f, captionRect.y + 5f, captionRect.width - 16f, 16f), "\u5de6\u4e0b\u9884\u89c8\u5f53\u524d Player \u4e0e\u624b\u6301\u6b66\u5668\u7684 Idle \u52a8\u753b", CreateLabelStyle(12, FontStyle.Normal, TextAnchor.MiddleLeft, SoftText));
     }
 
     private void DrawProgressCard(Rect rect)
@@ -173,21 +173,21 @@ public class PanelRoot : IPanel
         DrawBorder(infoBoxB, CardBorder, 1.5f);
 
         float columnWidth = (infoBoxA.width - 42f) * 0.5f;
-        GUI.Label(new Rect(infoBoxA.x + 14f, infoBoxA.y + 10f, columnWidth, 16f), "\u7528\u6237\u7b49\u7ea7", CreateLabelStyle(12, FontStyle.Normal, TextAnchor.UpperLeft, SoftText));
-        GUI.Label(new Rect(infoBoxA.x + 14f, infoBoxA.y + 30f, columnWidth, 24f), progress.Level.ToString(), CreateLabelStyle(22, FontStyle.Bold, TextAnchor.UpperLeft, Color.white));
-        GUI.Label(new Rect(infoBoxA.x + 20f + columnWidth, infoBoxA.y + 10f, columnWidth, 16f), "\u5f53\u524d\u91d1\u5e01", CreateLabelStyle(12, FontStyle.Normal, TextAnchor.UpperLeft, SoftText));
-        GUI.Label(new Rect(infoBoxA.x + 20f + columnWidth, infoBoxA.y + 30f, columnWidth, 24f), progress.Coins.ToString(), CreateLabelStyle(22, FontStyle.Bold, TextAnchor.UpperLeft, Color.white));
+        DrawCompatibleLabel(new Rect(infoBoxA.x + 14f, infoBoxA.y + 10f, columnWidth, 16f), "\u7528\u6237\u7b49\u7ea7", CreateLabelStyle(12, FontStyle.Normal, TextAnchor.UpperLeft, SoftText));
+        DrawCompatibleLabel(new Rect(infoBoxA.x + 14f, infoBoxA.y + 30f, columnWidth, 24f), progress.Level.ToString(), CreateLabelStyle(22, FontStyle.Bold, TextAnchor.UpperLeft, Color.white));
+        DrawCompatibleLabel(new Rect(infoBoxA.x + 20f + columnWidth, infoBoxA.y + 10f, columnWidth, 16f), "\u5f53\u524d\u91d1\u5e01", CreateLabelStyle(12, FontStyle.Normal, TextAnchor.UpperLeft, SoftText));
+        DrawCompatibleLabel(new Rect(infoBoxA.x + 20f + columnWidth, infoBoxA.y + 30f, columnWidth, 24f), progress.Coins.ToString(), CreateLabelStyle(22, FontStyle.Bold, TextAnchor.UpperLeft, Color.white));
 
-        GUI.Label(new Rect(infoBoxB.x + 14f, infoBoxB.y + 10f, columnWidth, 16f), "\u89d2\u8272\u5f3a\u5316", CreateLabelStyle(12, FontStyle.Normal, TextAnchor.UpperLeft, SoftText));
-        GUI.Label(new Rect(infoBoxB.x + 14f, infoBoxB.y + 30f, columnWidth, 22f), UserProgressRepository.GetUpgradeLevel(currentPlayer).ToString(), CreateLabelStyle(20, FontStyle.Bold, TextAnchor.UpperLeft, Color.white));
-        GUI.Label(new Rect(infoBoxB.x + 20f + columnWidth, infoBoxB.y + 10f, columnWidth, 16f), "\u4e0b\u6b21\u82b1\u8d39", CreateLabelStyle(12, FontStyle.Normal, TextAnchor.UpperLeft, SoftText));
-        GUI.Label(new Rect(infoBoxB.x + 20f + columnWidth, infoBoxB.y + 30f, columnWidth, 22f), UserProgressRepository.GetNextUpgradeCost(currentPlayer).ToString(), CreateLabelStyle(20, FontStyle.Bold, TextAnchor.UpperLeft, Color.white));
+        DrawCompatibleLabel(new Rect(infoBoxB.x + 14f, infoBoxB.y + 10f, columnWidth, 16f), "\u89d2\u8272\u5f3a\u5316", CreateLabelStyle(12, FontStyle.Normal, TextAnchor.UpperLeft, SoftText));
+        DrawCompatibleLabel(new Rect(infoBoxB.x + 14f, infoBoxB.y + 30f, columnWidth, 22f), $"{UserProgressRepository.GetUpgradeLevel(currentPlayer)}/{UserProgressRepository.GetPlayerUpgradeCap()}", CreateLabelStyle(20, FontStyle.Bold, TextAnchor.UpperLeft, Color.white));
+        DrawCompatibleLabel(new Rect(infoBoxB.x + 20f + columnWidth, infoBoxB.y + 10f, columnWidth, 16f), "\u4e0b\u6b21\u82b1\u8d39", CreateLabelStyle(12, FontStyle.Normal, TextAnchor.UpperLeft, SoftText));
+        DrawCompatibleLabel(new Rect(infoBoxB.x + 20f + columnWidth, infoBoxB.y + 30f, columnWidth, 22f), UserProgressRepository.IsPlayerUpgradeAtCap(currentPlayer) ? "\u5df2\u6ee1\u7ea7" : UserProgressRepository.GetNextUpgradeCost(currentPlayer).ToString(), CreateLabelStyle(20, FontStyle.Bold, TextAnchor.UpperLeft, Color.white));
 
         int requiredExp = UserProgressRepository.GetRequiredExpForLevel(progress.Level);
         Rect expBox = new Rect(rect.x + 18f, rect.y + 210f, rect.width - 36f, 24f);
         DrawFilledRect(expBox, new Color(0.05f, 0.08f, 0.11f, 0.96f));
         DrawBorder(expBox, Accent, 1.5f);
-        GUI.Label(new Rect(expBox.x + 12f, expBox.y + 4f, expBox.width - 24f, 16f), $"\u7528\u6237\u7ecf\u9a8c  {progress.CurrentExp}/{requiredExp}", CreateLabelStyle(12, FontStyle.Bold, TextAnchor.MiddleLeft, Accent));
+        DrawCompatibleLabel(new Rect(expBox.x + 12f, expBox.y + 4f, expBox.width - 24f, 16f), $"\u7528\u6237\u7ecf\u9a8c  {progress.CurrentExp}/{requiredExp}", CreateLabelStyle(12, FontStyle.Bold, TextAnchor.MiddleLeft, Accent));
     }
 
     private void DrawTipsCard(Rect rect)
@@ -206,14 +206,14 @@ public class PanelRoot : IPanel
         Rect viewRect = new Rect(0f, 0f, listRect.width - 20f, Mathf.Max(listRect.height - 4f, savedSessions.Count * 78f));
 
         DrawCard(dialogRect, "\u52a0\u8f7d\u5b58\u6863\u6e38\u620f");
-        GUI.Label(new Rect(dialogRect.x + 26f, dialogRect.y + 44f, dialogRect.width - 52f, 20f), "\u9009\u62e9\u4e00\u4e2a\u5b58\u6863\u540e\u91cd\u65b0\u8fdb\u5165\u5f53\u524d\u5bf9\u5c40\u3002", CreateLabelStyle(14, FontStyle.Normal, TextAnchor.UpperLeft, SoftText));
+        DrawCompatibleLabel(new Rect(dialogRect.x + 26f, dialogRect.y + 44f, dialogRect.width - 52f, 20f), "\u9009\u62e9\u4e00\u4e2a\u5b58\u6863\u540e\u91cd\u65b0\u8fdb\u5165\u5f53\u524d\u5bf9\u5c40\u3002", CreateLabelStyle(14, FontStyle.Normal, TextAnchor.UpperLeft, SoftText));
 
         DrawFilledRect(listRect, new Color(0.05f, 0.07f, 0.1f, 0.96f));
         DrawBorder(listRect, CardBorder, 2f);
 
         if (savedSessions.Count == 0)
         {
-            GUI.Label(new Rect(listRect.x, listRect.y + 134f, listRect.width, 24f), "\u5f53\u524d\u6682\u65e0\u53ef\u7528\u5b58\u6863\u3002", CreateLabelStyle(18, FontStyle.Bold, TextAnchor.MiddleCenter, Color.white));
+            DrawCompatibleLabel(new Rect(listRect.x, listRect.y + 134f, listRect.width, 24f), "\u5f53\u524d\u6682\u65e0\u53ef\u7528\u5b58\u6863\u3002", CreateLabelStyle(18, FontStyle.Bold, TextAnchor.MiddleCenter, Color.white));
         }
         else
         {
@@ -224,8 +224,8 @@ public class PanelRoot : IPanel
                 Rect itemRect = new Rect(8f, 8f + index * 78f, viewRect.width - 16f, 66f);
                 DrawFilledRect(itemRect, new Color(0.1f, 0.15f, 0.2f, 1f));
                 DrawBorder(itemRect, info.IsContinueSave ? Accent : CardBorder, 2f);
-                GUI.Label(new Rect(itemRect.x + 16f, itemRect.y + 10f, itemRect.width - 178f, 20f), info.DisplayName, CreateLabelStyle(15, FontStyle.Bold, TextAnchor.UpperLeft, Color.white));
-                GUI.Label(new Rect(itemRect.x + 16f, itemRect.y + 34f, itemRect.width - 178f, 18f), $"\u7b49\u7ea7 {info.Snapshot.PlayerLevel}  |  \u751f\u5b58 {FormatTime(info.Snapshot.ElapsedTime)}  |  \u7ecf\u9a8c {info.Snapshot.CurrentExp:0}/{Mathf.Max(1f, info.Snapshot.ExpToNextLevel):0}", CreateLabelStyle(13, FontStyle.Normal, TextAnchor.UpperLeft, SoftText));
+                DrawCompatibleLabel(new Rect(itemRect.x + 16f, itemRect.y + 10f, itemRect.width - 178f, 20f), info.DisplayName, CreateLabelStyle(15, FontStyle.Bold, TextAnchor.UpperLeft, Color.white));
+                DrawCompatibleLabel(new Rect(itemRect.x + 16f, itemRect.y + 34f, itemRect.width - 178f, 18f), $"\u7b49\u7ea7 {info.Snapshot.PlayerLevel}  |  \u751f\u5b58 {FormatTime(info.Snapshot.ElapsedTime)}  |  \u7ecf\u9a8c {info.Snapshot.CurrentExp:0}/{Mathf.Max(1f, info.Snapshot.ExpToNextLevel):0}", CreateLabelStyle(13, FontStyle.Normal, TextAnchor.UpperLeft, SoftText));
 
                 if (DrawButton(new Rect(itemRect.x + itemRect.width - 142f, itemRect.y + 13f, 126f, 40f), "\u8f7d\u5165\u5b58\u6863"))
                 {
@@ -362,8 +362,8 @@ public class PanelRoot : IPanel
     {
         Rect dialogRect = new Rect(VirtualWidth * 0.5f - 210f, VirtualHeight * 0.5f - 110f, 420f, 220f);
         DrawCard(dialogRect, "\u786e\u8ba4\u9000\u51fa");
-        GUI.Label(new Rect(dialogRect.x + 24f, dialogRect.y + 62f, dialogRect.width - 48f, 24f), "\u73b0\u5728\u9000\u51fa\u6e38\u620f\u5417\uff1f", CreateLabelStyle(20, FontStyle.Bold, TextAnchor.MiddleCenter, Color.white));
-        GUI.Label(new Rect(dialogRect.x + 24f, dialogRect.y + 92f, dialogRect.width - 48f, 20f), "\u5f53\u524d\u5bf9\u5c40\u7684\u7ee7\u7eed\u5b58\u6863\u4f1a\u88ab\u4fdd\u7559\u3002", CreateLabelStyle(14, FontStyle.Normal, TextAnchor.MiddleCenter, SoftText));
+        DrawCompatibleLabel(new Rect(dialogRect.x + 24f, dialogRect.y + 62f, dialogRect.width - 48f, 24f), "\u73b0\u5728\u9000\u51fa\u6e38\u620f\u5417\uff1f", CreateLabelStyle(20, FontStyle.Bold, TextAnchor.MiddleCenter, Color.white));
+        DrawCompatibleLabel(new Rect(dialogRect.x + 24f, dialogRect.y + 92f, dialogRect.width - 48f, 20f), "\u5f53\u524d\u5bf9\u5c40\u7684\u7ee7\u7eed\u5b58\u6863\u4f1a\u88ab\u4fdd\u7559\u3002", CreateLabelStyle(14, FontStyle.Normal, TextAnchor.MiddleCenter, SoftText));
 
         if (DrawButton(new Rect(dialogRect.x + 36f, dialogRect.y + 146f, 146f, 40f), "\u53d6\u6d88"))
         {
@@ -382,7 +382,7 @@ public class PanelRoot : IPanel
         DrawFilledRect(rect, CardBackground);
         DrawBorder(rect, CardBorder, 2f);
         DrawFilledRect(new Rect(rect.x, rect.y, rect.width, 5f), Accent);
-        GUI.Label(new Rect(rect.x + 18f, rect.y + 12f, rect.width - 36f, 22f), title, CreateLabelStyle(17, FontStyle.Bold, TextAnchor.UpperLeft, Accent));
+        DrawCompatibleLabel(new Rect(rect.x + 18f, rect.y + 12f, rect.width - 36f, 22f), title, CreateLabelStyle(17, FontStyle.Bold, TextAnchor.UpperLeft, Accent));
     }
 
     private bool DrawButton(Rect rect, string label)
@@ -412,10 +412,75 @@ public class PanelRoot : IPanel
             fontStyle = fontStyle,
             alignment = anchor,
             wordWrap = true,
+            clipping = TextClipping.Overflow,
             font = CjkFontHelper.GetFont()
         };
         style.normal.textColor = color;
         return style;
+    }
+
+    private void DrawCompatibleLabel(Rect rect, string text, GUIStyle style)
+    {
+        if (style == null)
+        {
+            GUI.Label(rect, text);
+            return;
+        }
+
+        rect = GetExpandedLabelRect(rect, text, style);
+
+        if (style.fontStyle != FontStyle.Bold && style.fontStyle != FontStyle.BoldAndItalic)
+        {
+            GUI.Label(rect, text, style);
+            return;
+        }
+
+        GUIStyle compatibleStyle = new GUIStyle(style)
+        {
+            fontStyle = style.fontStyle == FontStyle.BoldAndItalic ? FontStyle.Italic : FontStyle.Normal
+        };
+        GUIStyle outlineStyle = new GUIStyle(compatibleStyle);
+        Color mainColor = compatibleStyle.normal.textColor;
+        outlineStyle.normal.textColor = new Color(0f, 0f, 0f, Mathf.Clamp01(mainColor.a * 0.68f));
+
+        GUI.Label(new Rect(rect.x - 0.65f, rect.y, rect.width, rect.height), text, outlineStyle);
+        GUI.Label(new Rect(rect.x + 0.65f, rect.y, rect.width, rect.height), text, outlineStyle);
+        GUI.Label(new Rect(rect.x, rect.y - 0.65f, rect.width, rect.height), text, outlineStyle);
+        GUI.Label(new Rect(rect.x, rect.y + 0.65f, rect.width, rect.height), text, outlineStyle);
+        GUI.Label(rect, text, compatibleStyle);
+    }
+
+    private Rect GetExpandedLabelRect(Rect rect, string text, GUIStyle style)
+    {
+        GUIStyle measureStyle = new GUIStyle(style)
+        {
+            clipping = TextClipping.Overflow
+        };
+
+        float paddingX = Mathf.Max(6f, style.fontSize * 0.18f);
+        float paddingY = Mathf.Max(8f, style.fontSize * 0.28f);
+        float measuredWidth = Mathf.Max(1f, rect.width + paddingX * 2f);
+        float measuredHeight = Mathf.Max(rect.height, measureStyle.CalcHeight(new GUIContent(text), measuredWidth) + paddingY);
+        float offsetY = 0f;
+
+        if (style.alignment == TextAnchor.MiddleLeft ||
+            style.alignment == TextAnchor.MiddleCenter ||
+            style.alignment == TextAnchor.MiddleRight)
+        {
+            offsetY = (measuredHeight - rect.height) * 0.5f;
+        }
+        else if (style.alignment == TextAnchor.LowerLeft ||
+                 style.alignment == TextAnchor.LowerCenter ||
+                 style.alignment == TextAnchor.LowerRight)
+        {
+            offsetY = measuredHeight - rect.height;
+        }
+
+        return new Rect(
+            rect.x - paddingX * 0.5f,
+            rect.y - paddingY * 0.35f - offsetY,
+            rect.width + paddingX,
+            measuredHeight);
     }
 
     private void BeginVirtualCanvas()
