@@ -4,6 +4,8 @@ namespace GameScene
 {
     public class GameHudRoot
     {
+        private const float BarSmoothSpeed = 10f;
+        private const float BarSnapThreshold = 0.001f;
         private static readonly Color CardBackground = new Color(0.07f, 0.1f, 0.14f, 0.88f);
         private static readonly Color CardBorder = new Color(0.37f, 0.68f, 0.95f, 1f);
         private static readonly Color Accent = new Color(0.96f, 0.72f, 0.26f, 1f);
@@ -12,6 +14,10 @@ namespace GameScene
         private static readonly Color ExpBarColor = new Color(0.3f, 0.83f, 0.48f, 1f);
         private static readonly Color SoftText = new Color(0.82f, 0.88f, 0.94f, 1f);
         private static readonly Color OverlayTint = new Color(0.02f, 0.03f, 0.05f, 0.84f);
+        private float displayedPlayerHpRatio;
+        private float displayedExpRatio;
+        private bool playerHpBarInitialized;
+        private bool expBarInitialized;
 
         public void DrawGUI(IPlayer player)
         {
@@ -64,8 +70,10 @@ namespace GameScene
             GUI.Label(new Rect(rect.x + 18f, rect.y + 14f, rect.width - 36f, 28f), name, nameStyle);
 
             Rect barRect = new Rect(rect.x + 18f, rect.y + 48f, rect.width - 36f, 18f);
+            float hpRatio = Mathf.Clamp01(maxHp <= 0 ? 0f : (float)currentHp / maxHp);
+            displayedPlayerHpRatio = SmoothBarValue(displayedPlayerHpRatio, hpRatio, ref playerHpBarInitialized);
             DrawFilledRect(barRect, BarBackground);
-            DrawFilledRect(new Rect(barRect.x, barRect.y, barRect.width * Mathf.Clamp01(maxHp <= 0 ? 0f : (float)currentHp / maxHp), barRect.height), HpBarColor);
+            DrawFilledRect(new Rect(barRect.x, barRect.y, barRect.width * displayedPlayerHpRatio, barRect.height), HpBarColor);
             DrawBorder(barRect, CardBorder, 1f);
 
             GUI.Label(new Rect(rect.x + 20f, rect.y + 74f, 120f, 22f), "HP", statStyle);
@@ -125,8 +133,9 @@ namespace GameScene
             GUI.Label(new Rect(rect.x + 300f, rect.y + 12f, 110f, 18f), $"REWIND {session.RewindUsesRemaining}", CreateLabelStyle(15, FontStyle.Bold, TextAnchor.UpperLeft, Color.white));
 
             Rect expRect = new Rect(rect.x + 18f, rect.y + 42f, rect.width - 36f, 18f);
+            displayedExpRatio = SmoothBarValue(displayedExpRatio, session.ExpRatio, ref expBarInitialized);
             DrawFilledRect(expRect, BarBackground);
-            DrawFilledRect(new Rect(expRect.x, expRect.y, expRect.width * session.ExpRatio, expRect.height), ExpBarColor);
+            DrawFilledRect(new Rect(expRect.x, expRect.y, expRect.width * displayedExpRatio, expRect.height), ExpBarColor);
             DrawBorder(expRect, CardBorder, 1f);
 
             GUI.Label(new Rect(rect.x + 18f, rect.y + 64f, rect.width - 36f, 18f), $"EXP {session.CurrentExp:0}/{session.ExpToNextLevel:0}    Press R to rewind to the latest snapshot", CreateLabelStyle(13, FontStyle.Normal, TextAnchor.UpperLeft, SoftText));
@@ -325,6 +334,24 @@ namespace GameScene
             DrawFilledRect(new Rect(rect.x, rect.yMax - thickness, rect.width, thickness), color);
             DrawFilledRect(new Rect(rect.x, rect.y, thickness, rect.height), color);
             DrawFilledRect(new Rect(rect.xMax - thickness, rect.y, thickness, rect.height), color);
+        }
+
+        private float SmoothBarValue(float currentValue, float targetValue, ref bool initialized)
+        {
+            float clampedTarget = Mathf.Clamp01(targetValue);
+            if (!initialized)
+            {
+                initialized = true;
+                return clampedTarget;
+            }
+
+            if (Mathf.Abs(currentValue - clampedTarget) <= BarSnapThreshold)
+            {
+                return clampedTarget;
+            }
+
+            float interpolation = 1f - Mathf.Exp(-BarSmoothSpeed * Time.unscaledDeltaTime);
+            return Mathf.Lerp(currentValue, clampedTarget, interpolation);
         }
     }
 }

@@ -14,8 +14,7 @@ public class Player1IdleState:IPlayerState
     protected override void OnEnter()
     {
         base.OnEnter();
-        // Debug.Log(this);
-        m_Animator.SetBool("isRun",false);
+        animationBridge?.SetRunning(false);
         m_rb.velocity=Vector3.zero;
     }
     protected override void OnUpdate()
@@ -26,7 +25,7 @@ public class Player1IdleState:IPlayerState
     public override void OnExit()
     {
         base.OnExit();
-        m_Animator.SetBool("isRun",true);
+        animationBridge?.SetRunning(true);
     }
 
     void Move(){

@@ -104,6 +104,36 @@ public static class GameSceneSelectionApplier
             weaponTransform.gameObject.SetActive(weaponTransform == selectedWeaponTransform);
             AssignCamera(weaponTransform);
         }
+
+        if (selectedWeaponTransform != null)
+        {
+            selectedWeaponTransform.gameObject.SetActive(true);
+            AssignCamera(selectedWeaponTransform);
+        }
+    }
+
+    public static Ak47 FindSelectedWeapon(Transform playerTransform)
+    {
+        if (playerTransform == null)
+        {
+            return null;
+        }
+
+        foreach (Transform childTransform in playerTransform)
+        {
+            if (!childTransform.gameObject.activeSelf)
+            {
+                continue;
+            }
+
+            Ak47 activeWeapon = childTransform.GetComponent<Ak47>();
+            if (activeWeapon != null)
+            {
+                return activeWeapon;
+            }
+        }
+
+        return playerTransform.GetComponentInChildren<Ak47>(true);
     }
 
     private static void AssignCamera(Transform weaponTransform)

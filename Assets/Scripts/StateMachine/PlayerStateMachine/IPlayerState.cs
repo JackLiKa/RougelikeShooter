@@ -12,6 +12,7 @@ public abstract class IPlayerState:IState
     protected Transform transform=>gameObject.transform;
     protected Rigidbody2D m_rb;
     protected Animator m_Animator;
+    protected CharacterAnimationBridge animationBridge;
     
     public IPlayerState(PlayerStateMachine machine):base(machine){ }
     protected override void OnInit()
@@ -20,7 +21,8 @@ public abstract class IPlayerState:IState
         player=m_Machine.m_Player;
         gameObject=player.gameObject;
         m_rb=transform.GetComponent<Rigidbody2D>();
-        m_Animator=UnityTool.Instance.GetComponentFromChildren<Animator>(gameObject,"Sprite");
+        animationBridge = CharacterAnimationBridge.GetOrCreate(gameObject);
+        m_Animator = animationBridge != null ? animationBridge.Animator : UnityTool.Instance.GetComponentFromChildren<Animator>(gameObject,"Sprite");
     }
     protected override void OnEnter()
     {

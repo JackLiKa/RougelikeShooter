@@ -97,6 +97,8 @@ public sealed class RoguelikeGameManager : MonoBehaviour
     private Ak47 activeWeapon;
     private CameraFollow cameraFollow;
     private MapGenerator mapGenerator;
+    private CharacterAnimationBridge playerAnimation;
+    private AdaptiveDifficultyMonitor adaptiveDifficulty;
 
     private float elapsedTime;
     private float nextSnapshotTimer;
@@ -127,6 +129,7 @@ public sealed class RoguelikeGameManager : MonoBehaviour
     private bool hasSettledRewards;
     private bool hasShownWaterEffectPrompt;
     private bool wasPlayerInWaterLastFrame;
+    private bool isPlayerDeathSequenceRunning;
     private int rewindCountdownValue;
 
     private const float EnemySpawnDistanceMultiplier = 4f;
@@ -169,12 +172,23 @@ public sealed class RoguelikeGameManager : MonoBehaviour
     public bool ShowWaterEffectPrompt => showWaterEffectPrompt;
     public bool ShowRewindCountdown => showRewindCountdown;
     public int RewindCountdownValue => rewindCountdownValue;
-    public bool CanAcceptPlayerInput => initialized && !isPaused && !showPauseMenu && !showSettlement && !showUpgradeChoices && !showWaterEffectPrompt && !showRewindCountdown && !isRestoringSnapshot;
+    public bool CanAcceptPlayerInput => initialized
+        && !isPaused
+        && !showPauseMenu
+        && !showSettlement
+        && !showUpgradeChoices
+        && !showWaterEffectPrompt
+        && !showRewindCountdown
+        && !isRestoringSnapshot
+        && !isPlayerDeathSequenceRunning
+        && (playerStats == null || playerStats.CurrentHp > 0);
     public IReadOnlyList<EnemyActor> ActiveEnemies => activeEnemies;
     public IReadOnlyList<PowerCardData> CurrentCardChoices => currentCardChoices;
     public IReadOnlyList<OwnedPowerCardInfo> OwnedPowerCards => ownedPowerCards;
     public int EarnedGold => earnedGold;
     public int EarnedUserExp => earnedUserExp;
+    public float BehaviorEntropy => adaptiveDifficulty != null ? adaptiveDifficulty.CurrentEntropy : 0.5f;
+    public AdaptiveDifficultyMonitor.DifficultyBand CurrentDifficultyBand => adaptiveDifficulty != null ? adaptiveDifficulty.CurrentBand : AdaptiveDifficultyMonitor.DifficultyBand.Normal;
     public int CurrentPlayerUpgradeLevel => UserProgressRepository.GetUpgradeLevel(GameSelectionConfig.CurrentPlayerType);
     public Vector2 PlayerPosition => activePlayer != null ? activePlayer.position : Vector2.zero;
     public TerrainSurfaceType CurrentPlayerTerrainType => activePlayer != null ? GetTerrainType(activePlayer.position) : TerrainSurfaceType.Ground;
@@ -249,7 +263,7 @@ public sealed class RoguelikeGameManager : MonoBehaviour
             return;
         }
 
-        if (showSettlement || showRewindCountdown || isRestoringSnapshot)
+        if (showSettlement || showRewindCountdown || isRestoringSnapshot || isPlayerDeathSequenceRunning)
         {
             return;
         }
@@ -271,6 +285,7 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         elapsedTime += deltaTime;
         nextSnapshotTimer += deltaTime;
         nextAutoSaveTimer += deltaTime;
+        UpdateAdaptiveDifficulty(deltaTime);
 
         UpdateWaveState();
         UpdateWaveSpawns(deltaTime);
@@ -364,8 +379,10 @@ public sealed class RoguelikeGameManager : MonoBehaviour
             playerStats = activePlayer.gameObject.AddComponent<PlayerRuntimeStats>();
         }
 
+        playerAnimation = CharacterAnimationBridge.GetOrCreate(activePlayer.gameObject);
+
         weaponProfile = RoguelikeDataRepository.GetWeaponProfile(GameSelectionConfig.CurrentWeaponType);
-        activeWeapon = activePlayer.GetComponentInChildren<Ak47>(true);
+        activeWeapon = GameSceneSelectionApplier.FindSelectedWeapon(activePlayer);
         cameraFollow = FindAnyObjectByType<CameraFollow>();
         mapGenerator = FindAnyObjectByType<MapGenerator>();
         if (cameraFollow != null)
@@ -373,7 +390,7 @@ public sealed class RoguelikeGameManager : MonoBehaviour
             cameraFollow.target = activePlayer;
         }
 
-        return activeWeapon != null;
+        return true;
     }
 
     private void PrepareTemplates()
@@ -453,6 +470,7 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         showWaterEffectPrompt = false;
         showRewindCountdown = false;
         isRestoringSnapshot = false;
+        isPlayerDeathSequenceRunning = false;
         hasShownWaterEffectPrompt = false;
         wasPlayerInWaterLastFrame = false;
         rewindCountdownValue = 0;
@@ -466,6 +484,8 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         activeWaveSpawns.Clear();
 
         activePlayer.position = GetInitialPlayerSpawnPosition();
+        ResetPlayerAnimationState();
+        InitializeAdaptiveDifficulty();
     }
 
     public bool TryFireWeapon(Vector3 muzzlePosition, Vector2 direction)
@@ -583,11 +603,7 @@ public sealed class RoguelikeGameManager : MonoBehaviour
             }
 
             bullet.RegisterEnemyHit(targetEnemy);
-            bool enemyAlive = targetEnemy.TakeDamage(bullet.Damage);
-            if (!enemyAlive)
-            {
-                HandleEnemyDefeated(targetEnemy);
-            }
+            targetEnemy.TakeDamage(bullet.Damage);
 
             if (bullet.RemainingPierce <= 0)
             {
@@ -602,7 +618,7 @@ public sealed class RoguelikeGameManager : MonoBehaviour
 
     public void DamagePlayer(int damage)
     {
-        if (showSettlement || playerStats == null)
+        if (showSettlement || isPlayerDeathSequenceRunning || playerStats == null)
         {
             return;
         }
@@ -615,7 +631,7 @@ public sealed class RoguelikeGameManager : MonoBehaviour
             return;
         }
 
-        BeginSettlement(false);
+        StartPlayerDeathSequence();
     }
 
     public void CollectPickup(ExperiencePickup pickup)
@@ -627,8 +643,7 @@ public sealed class RoguelikeGameManager : MonoBehaviour
 
         if (pickup.GrantsFreeLevel)
         {
-            pendingLevelChoices++;
-            OpenUpgradeChoicesIfNeeded();
+            AddExperience(ExpToNextLevel * 0.25f);
         }
         else
         {
@@ -692,13 +707,18 @@ public sealed class RoguelikeGameManager : MonoBehaviour
             return;
         }
 
+        adaptiveDifficulty?.RecordRewind();
         int remainingAfterRewind = Mathf.Max(0, rewindUsesRemaining - 1);
         StartCoroutine(RewindCountdownRoutine(snapshot, remainingAfterRewind));
     }
 
     public void SaveSession()
     {
-        SessionSaveRepository.SaveSession(CaptureSnapshot());
+        SessionSnapshotData snapshot = CaptureSnapshot();
+        if (!SessionSaveRepository.TrySaveSession(snapshot, false, out _, out _))
+        {
+            Debug.LogError("SaveSession failed.");
+        }
     }
 
     public void CreateManualSave()
@@ -719,7 +739,13 @@ public sealed class RoguelikeGameManager : MonoBehaviour
 
     public void QuitGameWithSave()
     {
-        SaveSession();
+        SessionSnapshotData snapshot = CaptureSnapshot();
+        if (!SessionSaveRepository.TrySaveSession(snapshot, true, out _, out _))
+        {
+            Debug.LogError("QuitGameWithSave aborted because the save failed.");
+            return;
+        }
+
         UserProgressRepository.Save();
 #if UNITY_EDITOR
         UnityEditor.EditorApplication.isPlaying = false;
@@ -872,6 +898,9 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         RecalculateCardBonuses();
         activePlayer.position = new Vector3(snapshot.PlayerPositionX, snapshot.PlayerPositionY, 0f);
         playerStats.SetCurrentHp(snapshot.PlayerHp);
+        isPlayerDeathSequenceRunning = false;
+        ResetPlayerAnimationState();
+        adaptiveDifficulty?.CaptureCurrentState(playerLevel, CurrentFireRate, GetCurrentAttackPower());
         activeWaveSpawns.Clear();
         QueueWave(currentWave);
 
@@ -1007,27 +1036,56 @@ public sealed class RoguelikeGameManager : MonoBehaviour
     {
         activeWaveSpawns.Clear();
         List<WaveProfile> waveProfiles = RoguelikeDataRepository.GetWaveProfilesFor(waveIndex);
+        float densityMultiplier = adaptiveDifficulty != null ? adaptiveDifficulty.CurrentEnemyDensityMultiplier : 1f;
+        bool useSkilledProfile = adaptiveDifficulty != null && adaptiveDifficulty.CurrentBand == AdaptiveDifficultyMonitor.DifficultyBand.Skilled;
+        float targetEliteRatio = adaptiveDifficulty != null ? adaptiveDifficulty.CurrentEliteRatio : 0f;
+
         for (int index = 0; index < waveProfiles.Count; index++)
         {
             WaveProfile wave = waveProfiles[index];
             EnemyProfile enemyProfile = RoguelikeDataRepository.GetEnemyProfile(wave.EnemyKey);
-            activeWaveSpawns.Add(new ActiveWaveSpawn
-            {
-                Profile = enemyProfile,
-                RemainingCount = wave.SpawnCount,
-                SpawnInterval = wave.SpawnInterval,
-                Timer = 0f,
-                IsElite = false
-            });
+            int normalCount = ScaleSpawnCount(wave.SpawnCount, densityMultiplier);
+            int eliteCount = 0;
+            EnemyProfile eliteProfile = ResolveEliteProfile(wave);
 
-            if (waveIndex % 5 == 0 && wave.EliteCount > 0)
+            if (useSkilledProfile)
             {
-                EnemyProfile eliteProfile = RoguelikeDataRepository.GetEnemyProfile(wave.EliteEnemyKey);
+                int totalCount = ScaleSpawnCount(wave.SpawnCount + Mathf.Max(0, wave.EliteCount), densityMultiplier);
+                if (totalCount > 0)
+                {
+                    eliteCount = Mathf.Clamp(Mathf.RoundToInt(totalCount * targetEliteRatio), 0, totalCount);
+                    if (eliteCount == 0)
+                    {
+                        eliteCount = 1;
+                    }
+
+                    normalCount = Mathf.Max(0, totalCount - eliteCount);
+                }
+            }
+            else if (waveIndex % 5 == 0 && wave.EliteCount > 0)
+            {
+                eliteCount = ScaleSpawnCount(wave.EliteCount, densityMultiplier);
+            }
+
+            if (normalCount > 0)
+            {
+                activeWaveSpawns.Add(new ActiveWaveSpawn
+                {
+                    Profile = enemyProfile,
+                    RemainingCount = normalCount,
+                    SpawnInterval = wave.SpawnInterval,
+                    Timer = 0f,
+                    IsElite = false
+                });
+            }
+
+            if (eliteCount > 0 && eliteProfile != null)
+            {
                 activeWaveSpawns.Add(new ActiveWaveSpawn
                 {
                     Profile = eliteProfile,
-                    RemainingCount = wave.EliteCount,
-                    SpawnInterval = Mathf.Max(1f, wave.SpawnInterval * 2f),
+                    RemainingCount = eliteCount,
+                    SpawnInterval = Mathf.Max(0.85f, wave.SpawnInterval * (useSkilledProfile ? 1.35f : 2f)),
                     Timer = 0.25f,
                     IsElite = true
                 });
@@ -1232,6 +1290,95 @@ public sealed class RoguelikeGameManager : MonoBehaviour
             sessionBonuses.BonusShootRate);
     }
 
+    private void InitializeAdaptiveDifficulty()
+    {
+        if (weaponProfile == null || playerStats == null)
+        {
+            return;
+        }
+
+        if (adaptiveDifficulty == null)
+        {
+            adaptiveDifficulty = new AdaptiveDifficultyMonitor();
+        }
+
+        adaptiveDifficulty.Initialize(playerLevel, CurrentFireRate, GetCurrentAttackPower());
+    }
+
+    private void UpdateAdaptiveDifficulty(float deltaTime)
+    {
+        if (adaptiveDifficulty == null || weaponProfile == null || playerStats == null)
+        {
+            return;
+        }
+
+        adaptiveDifficulty.Tick(deltaTime, playerLevel, CurrentFireRate, GetCurrentAttackPower());
+    }
+
+    private int GetCurrentAttackPower()
+    {
+        if (weaponProfile == null || playerStats == null)
+        {
+            return 1;
+        }
+
+        return Mathf.Max(1, weaponProfile.Damage + playerStats.Attack + sessionBonuses.BonusAttack);
+    }
+
+    private void ResetPlayerAnimationState()
+    {
+        if (activePlayer == null)
+        {
+            return;
+        }
+
+        if (playerAnimation == null)
+        {
+            playerAnimation = CharacterAnimationBridge.GetOrCreate(activePlayer.gameObject);
+        }
+
+        playerAnimation?.ResetState();
+    }
+
+    private void StartPlayerDeathSequence()
+    {
+        if (showSettlement || isPlayerDeathSequenceRunning)
+        {
+            return;
+        }
+
+        isPlayerDeathSequenceRunning = true;
+        playerAnimation?.SetRunning(false);
+        playerAnimation?.SetDying(true);
+        StartCoroutine(PlayerDeathSequenceRoutine());
+    }
+
+    private IEnumerator PlayerDeathSequenceRoutine()
+    {
+        yield return new WaitForSecondsRealtime(0.75f);
+        BeginSettlement(false);
+    }
+
+    private static int ScaleSpawnCount(int baseCount, float multiplier)
+    {
+        if (baseCount <= 0)
+        {
+            return 0;
+        }
+
+        return Mathf.Max(0, Mathf.RoundToInt(baseCount * multiplier));
+    }
+
+    private static EnemyProfile ResolveEliteProfile(WaveProfile wave)
+    {
+        if (wave != null && !string.IsNullOrWhiteSpace(wave.EliteEnemyKey))
+        {
+            return RoguelikeDataRepository.GetEnemyProfile(wave.EliteEnemyKey);
+        }
+
+        return RoguelikeDataRepository.GetDefaultEliteProfile();
+    }
+
     private void HandleEnemyDefeated(EnemyActor enemy)
     {
         if (enemy == null)
@@ -1239,6 +1386,7 @@ public sealed class RoguelikeGameManager : MonoBehaviour
             return;
         }
 
+        adaptiveDifficulty?.RecordKill();
         GameVoiceManager.PlayEnemyDeath(enemy.EnemyKey);
 
         if (enemy.IsElite)
@@ -1271,11 +1419,14 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         bool isElite = forceElite || profile.IsElite;
         float waveScaleFactor = 1f + (waveScaling * EnemyWaveHpScalePerWave);
         float attackScaleFactor = 1f + (waveScaling * EnemyWaveAttackScalePerWave);
-        float hpMultiplier = (isElite ? 1.75f : 1f) * EnemyBaseHpMultiplier;
-        float attackMultiplier = isElite ? 1.45f : 1f;
+        float adaptiveHpMultiplier = adaptiveDifficulty != null ? adaptiveDifficulty.CurrentEnemyHpMultiplier : 1f;
+        float adaptiveAttackMultiplier = adaptiveDifficulty != null ? adaptiveDifficulty.CurrentEnemyAttackMultiplier : 1f;
+        float adaptiveAttackIntervalMultiplier = adaptiveDifficulty != null ? adaptiveDifficulty.CurrentEnemyAttackIntervalMultiplier : 1f;
+        float hpMultiplier = (isElite ? 1.75f : 1f) * EnemyBaseHpMultiplier * adaptiveHpMultiplier;
+        float attackMultiplier = (isElite ? 1.45f : 1f) * adaptiveAttackMultiplier;
         float moveMultiplier = isElite ? 1.2f : 1f;
         float scaleMultiplier = (isElite ? 1.15f : 1f) * (1f + Mathf.Min(0.3f, waveScaling * EnemyWaveScaleGain));
-        float scaledAttackInterval = Mathf.Max(0.45f, profile.AttackInterval - (waveScaling * EnemyWaveAttackIntervalReduction));
+        float scaledAttackInterval = Mathf.Max(0.45f, (profile.AttackInterval - (waveScaling * EnemyWaveAttackIntervalReduction)) * adaptiveAttackIntervalMultiplier);
         float scaledContactRange = profile.ContactRange + (waveScaling * EnemyWaveContactRangeGain);
         float scaledMoveSpeed = (profile.MoveSpeed * (1f + (waveScaling * 0.03f))) + (waveScaling * EnemyWaveMoveSpeedGain);
 
@@ -1366,6 +1517,7 @@ public sealed class RoguelikeGameManager : MonoBehaviour
             return;
         }
 
+        isPlayerDeathSequenceRunning = false;
         SetPaused(true);
         showPauseMenu = false;
         showUpgradeChoices = false;

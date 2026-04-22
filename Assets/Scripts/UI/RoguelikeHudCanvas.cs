@@ -15,11 +15,14 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
     {
         public RectTransform Root;
         public RectTransform BackgroundRect;
-        public Image FillImage;
+        public RectTransform FillRect;
         public Text ValueText;
+        public float DisplayFill;
     }
 
     private const int MaxCardSlots = 3;
+    private const float BarSmoothSpeed = 10f;
+    private const float BarSnapThreshold = 0.001f;
 
     private static readonly Color CardBackground = new Color(0.07f, 0.1f, 0.14f, 0.88f);
     private static readonly Color CardBorder = new Color(0.37f, 0.68f, 0.95f, 1f);
@@ -65,7 +68,8 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
     private Text fireRateText;
     private Text pierceText;
     private Text weaponText;
-    private Image hpFillImage;
+    private RectTransform hpBarBackgroundRect;
+    private RectTransform hpFillRect;
 
     private Text waveValueText;
     private Text waveHintText;
@@ -76,7 +80,8 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
     private Text rewindText;
     private Text expHintText;
     private Text reloadHintText;
-    private Image expFillImage;
+    private RectTransform expBarBackgroundRect;
+    private RectTransform expFillRect;
 
     private Text settlementWaveText;
     private Text settlementGoldText;
@@ -91,6 +96,10 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
     private RectTransform minimapArea;
     private Image minimapPlayerDot;
     private RectTransform enemyBarLayer;
+    private float displayedPlayerHpRatio;
+    private float displayedExpRatio;
+    private bool playerHpBarInitialized;
+    private bool expBarInitialized;
 
     public static RoguelikeHudCanvas EnsureExists(GameObject host)
     {
@@ -186,7 +195,7 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
         fireRateText.text = $"\u5c04\u901f {session.CurrentFireRate:0.0}/\u79d2";
         pierceText.text = $"\u989d\u5916\u7a7f\u900f {session.CurrentExtraPierce}";
         weaponText.text = $"\u6b66\u5668 {GameSelectionConfig.GetWeaponDisplayName(GameSelectionConfig.CurrentWeaponType)}";
-        hpFillImage.fillAmount = stats != null ? stats.HealthRatio : 0f;
+        UpdateSmoothFill(hpBarBackgroundRect, hpFillRect, stats != null ? stats.HealthRatio : 0f, ref displayedPlayerHpRatio, ref playerHpBarInitialized);
 
         waveValueText.text = $"\u7b2c {session.CurrentWave} \u6ce2";
         waveHintText.text = $"\u4e0b\u4e00\u6ce2\u5012\u8ba1\u65f6 {session.NextWaveIn:0} \u79d2";
@@ -195,7 +204,7 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
         levelText.text = $"\u7b49\u7ea7 {session.PlayerLevel}";
         ammoText.text = $"\u5f39\u836f {session.CurrentAmmo}/{session.MaxAmmo}";
         rewindText.text = $"\u56de\u6eaf {session.RewindUsesRemaining}";
-        expFillImage.fillAmount = session.ExpRatio;
+        UpdateSmoothFill(expBarBackgroundRect, expFillRect, session.ExpRatio, ref displayedExpRatio, ref expBarInitialized);
         expHintText.text = $"\u7ecf\u9a8c\u503c {session.CurrentExp:0}/{session.ExpToNextLevel:0}    \u6309 R \u952e\u56de\u6eaf\u5230\u6700\u8fd1\u5feb\u7167";
         reloadHintText.text = session.IsReloading ? $"\u6362\u5f39\u4e2d {session.ReloadRemaining:0.0} \u79d2" : string.Empty;
 
@@ -260,7 +269,10 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
             return;
         }
 
-        System.Text.StringBuilder builder = new System.Text.StringBuilder();
+        Dictionary<string, int> intBonuses = new Dictionary<string, int>();
+        Dictionary<string, float> floatBonuses = new Dictionary<string, float>();
+        int totalStacks = 0;
+
         for (int index = 0; index < ownedCards.Count; index++)
         {
             RoguelikeGameManager.OwnedPowerCardInfo info = ownedCards[index];
@@ -269,21 +281,26 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
                 continue;
             }
 
-            if (builder.Length > 0)
-            {
-                builder.Append("\n\n");
-            }
-
-            builder.Append(info.Card.Title)
-                .Append("  x")
-                .Append(info.StackCount)
-                .Append('\n')
-                .Append(info.Card.Description)
-                .Append('\n')
-                .Append(BuildCardSummary(info.Card));
+            int stackCount = Mathf.Max(0, info.StackCount);
+            totalStacks += stackCount;
+            AddInventoryBonus(intBonuses, "生命值", info.Card.BonusHp * stackCount);
+            AddInventoryBonus(intBonuses, "攻击力", info.Card.BonusAttack * stackCount);
+            AddInventoryBonus(floatBonuses, "移动速度", info.Card.BonusMoveSpeed * stackCount);
+            AddInventoryBonus(floatBonuses, "射速", info.Card.BonusShootRate * stackCount);
+            AddInventoryBonus(floatBonuses, "子弹速度", info.Card.BonusBulletSpeed * stackCount);
+            AddInventoryBonus(intBonuses, "额外子弹", info.Card.BonusProjectileCount * stackCount);
+            AddInventoryBonus(intBonuses, "子弹齐射", info.Card.BonusVolleyCount * stackCount);
+            AddInventoryBonus(intBonuses, "子弹连射", info.Card.BonusBurstCount * stackCount);
+            AddInventoryBonus(intBonuses, "穿透", info.Card.BonusPierce * stackCount);
+            AddInventoryBonus(floatBonuses, "拾取范围", info.Card.BonusPickupRadius * stackCount);
+            AddInventoryBonus(intBonuses, "拾取回血", info.Card.BonusHealOnPickup * stackCount);
         }
 
-        inventoryCardsText.text = builder.Length > 0 ? builder.ToString() : "\u5f53\u524d\u8fd8\u6ca1\u6709\u83b7\u5f97\u4efb\u4f55\u5f3a\u5316\u3002";
+        System.Text.StringBuilder builder = new System.Text.StringBuilder();
+        builder.Append("已获得强化种类 ").Append(ownedCards.Count).Append("  |  总层数 ").Append(totalStacks);
+        AppendInventoryLines(builder, intBonuses);
+        AppendInventoryLines(builder, floatBonuses);
+        inventoryCardsText.text = builder.ToString();
     }
 
     private void RefreshWaterOverlay()
@@ -389,7 +406,7 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
     {
         EnemyHealthBar bar = GetOrCreateEnemyHealthBar(enemyId, enemy.IsElite);
         bar.BackgroundRect.sizeDelta = new Vector2(enemy.IsElite ? 120f : 96f, 16f);
-        bar.FillImage.fillAmount = enemy.HealthRatio;
+        UpdateSmoothFill(bar.BackgroundRect, bar.FillRect, enemy.HealthRatio, ref bar.DisplayFill);
         bar.ValueText.text = $"{enemy.CurrentHp}/{enemy.MaxHp}";
 
         bool isVisible = TryGetScreenPosition(enemy.Position + (Vector2.up * enemy.UiHeadOffset), out Vector2 localPoint);
@@ -503,14 +520,7 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
         RectTransform backgroundRect = CreateColoredRect(barRoot, "BarBackground", new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(isElite ? 120f : 96f, 16f), Vector2.zero, BarBackground);
         AddOutline(backgroundRect.gameObject, isElite ? EliteEnemyDotColor : CardBorder, new Vector2(1f, -1f));
 
-        RectTransform fillRect = CreateColoredRect(backgroundRect, "BarFill", Vector2.zero, Vector2.one, new Vector2(0.5f, 0.5f), Vector2.zero, Vector2.zero, HpBarColor);
-        fillRect.offsetMin = Vector2.zero;
-        fillRect.offsetMax = Vector2.zero;
-        Image fillImage = fillRect.GetComponent<Image>();
-        fillImage.type = Image.Type.Filled;
-        fillImage.fillMethod = Image.FillMethod.Horizontal;
-        fillImage.fillOrigin = 0;
-        fillImage.fillAmount = 1f;
+        RectTransform fillRect = CreateSlidingBarFill(backgroundRect, "BarFill", HpBarColor, backgroundRect.sizeDelta.x);
 
         Text valueText = CreateText(barRoot, "HpValue", 12, FontStyle.Bold, TextAnchor.MiddleCenter, Color.white, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(132f, 22f));
 
@@ -518,8 +528,9 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
         {
             Root = barRoot,
             BackgroundRect = backgroundRect,
-            FillImage = fillImage,
-            ValueText = valueText
+            FillRect = fillRect,
+            ValueText = valueText,
+            DisplayFill = 1f
         };
         enemyHealthBars[enemyId] = bar;
         return bar;
@@ -578,7 +589,7 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
     {
         RectTransform playerPanel = CreatePanel(root, "PlayerPanel", new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(360f, 194f), new Vector2(18f, -18f));
         playerNameText = CreateText(playerPanel, "PlayerName", 22, FontStyle.Bold, TextAnchor.UpperLeft, Color.white, new Vector2(18f, -14f), new Vector2(324f, 28f));
-        CreateBar(playerPanel, new Vector2(18f, -52f), new Vector2(324f, 18f), HpBarColor, out hpFillImage);
+        CreateBar(playerPanel, new Vector2(18f, -52f), new Vector2(324f, 18f), HpBarColor, out hpBarBackgroundRect, out hpFillRect);
         CreateText(playerPanel, "HpLabel", 14, FontStyle.Normal, TextAnchor.UpperLeft, SoftText, new Vector2(20f, -76f), new Vector2(40f, 22f)).text = "\u751f\u547d";
         hpValueText = CreateText(playerPanel, "HpValue", 17, FontStyle.Bold, TextAnchor.UpperLeft, Color.white, new Vector2(66f, -74f), new Vector2(120f, 24f));
         attackText = CreateText(playerPanel, "AttackText", 15, FontStyle.Normal, TextAnchor.UpperLeft, SoftText, new Vector2(20f, -108f), new Vector2(120f, 22f));
@@ -600,7 +611,7 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
         levelText = CreateText(progressPanel, "LevelText", 18, FontStyle.Bold, TextAnchor.UpperLeft, Accent, new Vector2(18f, -12f), new Vector2(120f, 18f));
         ammoText = CreateText(progressPanel, "AmmoText", 15, FontStyle.Bold, TextAnchor.UpperLeft, Color.white, new Vector2(160f, -14f), new Vector2(130f, 18f));
         rewindText = CreateText(progressPanel, "RewindText", 15, FontStyle.Bold, TextAnchor.UpperLeft, Color.white, new Vector2(320f, -14f), new Vector2(110f, 18f));
-        CreateBar(progressPanel, new Vector2(18f, -44f), new Vector2(424f, 18f), ExpBarColor, out expFillImage);
+        CreateBar(progressPanel, new Vector2(18f, -44f), new Vector2(424f, 18f), ExpBarColor, out expBarBackgroundRect, out expFillRect);
         expHintText = CreateText(progressPanel, "ExpHint", 13, FontStyle.Normal, TextAnchor.UpperLeft, SoftText, new Vector2(18f, -66f), new Vector2(424f, 18f));
         reloadHintText = CreateText(progressPanel, "ReloadHint", 12, FontStyle.Bold, TextAnchor.UpperLeft, Accent, new Vector2(18f, -84f), new Vector2(424f, 16f));
 
@@ -811,11 +822,11 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
         }
     }
 
-    private void CreateBar(RectTransform parent, Vector2 anchoredPosition, Vector2 size, Color fillColor, out Image fillImage)
+    private void CreateBar(RectTransform parent, Vector2 anchoredPosition, Vector2 size, Color fillColor, out RectTransform backgroundRect, out RectTransform fillRect)
     {
         GameObject backgroundObject = new GameObject("BarBackground", typeof(RectTransform), typeof(Image), typeof(Outline));
         backgroundObject.transform.SetParent(parent, false);
-        RectTransform backgroundRect = backgroundObject.GetComponent<RectTransform>();
+        backgroundRect = backgroundObject.GetComponent<RectTransform>();
         backgroundRect.anchorMin = new Vector2(0f, 1f);
         backgroundRect.anchorMax = new Vector2(0f, 1f);
         backgroundRect.pivot = new Vector2(0f, 1f);
@@ -829,20 +840,68 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
         outline.effectColor = CardBorder;
         outline.effectDistance = new Vector2(1f, -1f);
 
-        GameObject fillObject = new GameObject("BarFill", typeof(RectTransform), typeof(Image));
-        fillObject.transform.SetParent(backgroundObject.transform, false);
-        RectTransform fillRect = fillObject.GetComponent<RectTransform>();
-        fillRect.anchorMin = Vector2.zero;
-        fillRect.anchorMax = Vector2.one;
-        fillRect.offsetMin = Vector2.zero;
-        fillRect.offsetMax = Vector2.zero;
+        fillRect = CreateSlidingBarFill(backgroundRect, "BarFill", fillColor, 0f);
+    }
 
-        fillImage = fillObject.GetComponent<Image>();
+    private RectTransform CreateSlidingBarFill(RectTransform parent, string name, Color fillColor, float width)
+    {
+        GameObject fillObject = new GameObject(name, typeof(RectTransform), typeof(Image));
+        fillObject.transform.SetParent(parent, false);
+        RectTransform fillRect = fillObject.GetComponent<RectTransform>();
+        fillRect.anchorMin = new Vector2(0f, 0f);
+        fillRect.anchorMax = new Vector2(0f, 1f);
+        fillRect.pivot = new Vector2(0f, 0.5f);
+        fillRect.anchoredPosition = Vector2.zero;
+        fillRect.sizeDelta = new Vector2(Mathf.Max(0f, width), 0f);
+
+        Image fillImage = fillObject.GetComponent<Image>();
         fillImage.color = fillColor;
-        fillImage.type = Image.Type.Filled;
-        fillImage.fillMethod = Image.FillMethod.Horizontal;
-        fillImage.fillOrigin = 0;
-        fillImage.fillAmount = 0f;
+        fillImage.raycastTarget = false;
+        return fillRect;
+    }
+
+    private void UpdateSmoothFill(RectTransform backgroundRect, RectTransform fillRect, float targetValue, ref float displayedValue)
+    {
+        if (backgroundRect == null || fillRect == null)
+        {
+            return;
+        }
+
+        float clampedTarget = Mathf.Clamp01(targetValue);
+        displayedValue = SmoothBarValue(displayedValue, clampedTarget);
+        fillRect.sizeDelta = new Vector2(Mathf.Max(0f, backgroundRect.sizeDelta.x * displayedValue), 0f);
+    }
+
+    private void UpdateSmoothFill(RectTransform backgroundRect, RectTransform fillRect, float targetValue, ref float displayedValue, ref bool initialized)
+    {
+        if (backgroundRect == null || fillRect == null)
+        {
+            return;
+        }
+
+        float clampedTarget = Mathf.Clamp01(targetValue);
+        if (!initialized)
+        {
+            displayedValue = clampedTarget;
+            initialized = true;
+        }
+        else
+        {
+            displayedValue = SmoothBarValue(displayedValue, clampedTarget);
+        }
+
+        fillRect.sizeDelta = new Vector2(Mathf.Max(0f, backgroundRect.sizeDelta.x * displayedValue), 0f);
+    }
+
+    private float SmoothBarValue(float currentValue, float targetValue)
+    {
+        if (Mathf.Abs(currentValue - targetValue) <= BarSnapThreshold)
+        {
+            return targetValue;
+        }
+
+        float interpolation = 1f - Mathf.Exp(-BarSmoothSpeed * Time.unscaledDeltaTime);
+        return Mathf.Lerp(currentValue, targetValue, interpolation);
     }
 
     private GameObject CreateOverlay(RectTransform root, string name)
@@ -960,6 +1019,48 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
         AppendBonus(builder, card.BonusPickupRadius, "\u62fe\u53d6\u8303\u56f4");
         AppendBonus(builder, card.BonusHealOnPickup, "\u62fe\u53d6\u56de\u8840");
         return builder.Length == 0 ? "\u5f53\u524d\u6ca1\u6709\u989d\u5916\u6548\u679c\u3002" : builder.ToString();
+    }
+
+    private static void AddInventoryBonus(Dictionary<string, int> bucket, string label, int value)
+    {
+        if (value == 0)
+        {
+            return;
+        }
+
+        bucket[label] = bucket.TryGetValue(label, out int currentValue) ? currentValue + value : value;
+    }
+
+    private static void AddInventoryBonus(Dictionary<string, float> bucket, string label, float value)
+    {
+        if (Mathf.Abs(value) <= 0.001f)
+        {
+            return;
+        }
+
+        bucket[label] = bucket.TryGetValue(label, out float currentValue) ? currentValue + value : value;
+    }
+
+    private static void AppendInventoryLines(System.Text.StringBuilder builder, Dictionary<string, int> bonuses)
+    {
+        foreach (KeyValuePair<string, int> pair in bonuses)
+        {
+            builder.Append('\n')
+                .Append(pair.Key)
+                .Append(" +")
+                .Append(pair.Value);
+        }
+    }
+
+    private static void AppendInventoryLines(System.Text.StringBuilder builder, Dictionary<string, float> bonuses)
+    {
+        foreach (KeyValuePair<string, float> pair in bonuses)
+        {
+            builder.Append('\n')
+                .Append(pair.Key)
+                .Append(" +")
+                .Append(pair.Value.ToString("0.0"));
+        }
     }
 
     private static void AppendBonus(System.Text.StringBuilder builder, int value, string label)

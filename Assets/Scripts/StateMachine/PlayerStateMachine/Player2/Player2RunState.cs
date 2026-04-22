@@ -16,7 +16,7 @@ public class Player2RunState : IPlayerState
     {
         base.OnEnter();
         moveSpeed = PlayerRuntimeStats.GetMoveSpeed(gameObject, moveSpeed);
-        m_Animator.SetBool("isRun", true);
+        animationBridge?.SetRunning(true);
     }
 
     protected override void OnUpdate()
@@ -28,7 +28,7 @@ public class Player2RunState : IPlayerState
     public override void OnExit()
     {
         base.OnExit();
-        m_Animator.SetBool("isRun", false);
+        animationBridge?.SetRunning(false);
     }
 
     private void Move()

@@ -2,7 +2,10 @@ using UnityEngine;
 
 public class EnemyActor : MonoBehaviour
 {
+    private const float DeathAnimationDuration = 0.85f;
+
     private SpriteRenderer[] spriteRenderers;
+    private CharacterAnimationBridge animationBridge;
 
     private RoguelikeGameManager owner;
     private EnemyProfile profile;
@@ -18,6 +21,8 @@ public class EnemyActor : MonoBehaviour
     private float visualHalfHeight;
     private float terrainDamageTimer;
     private bool isElite;
+    private bool isDying;
+    private float deathTimer;
 
     public string EnemyKey => profile != null ? profile.EnemyKey : string.Empty;
     public int CurrentHp => currentHp;
@@ -31,11 +36,14 @@ public class EnemyActor : MonoBehaviour
     private void Awake()
     {
         CacheSpriteRenderers();
+        animationBridge = CharacterAnimationBridge.GetOrCreate(gameObject);
     }
 
     private void OnEnable()
     {
         CacheSpriteRenderers();
+        animationBridge = CharacterAnimationBridge.GetOrCreate(gameObject);
+        animationBridge?.ResetState();
     }
 
     public void Configure(
@@ -61,18 +69,37 @@ public class EnemyActor : MonoBehaviour
         this.isElite = isElite;
         attackCooldown = 0f;
         terrainDamageTimer = 0f;
+        isDying = false;
+        deathTimer = 0f;
         transform.localScale = new Vector3(scale, scale, 1f);
         hitRadius = CalculateVisualHitRadius(scale);
         visualHalfHeight = CalculateVisualHalfHeight(scale);
+        animationBridge?.ResetState();
     }
 
     public void RestoreState(int hp)
     {
         currentHp = Mathf.Clamp(hp, 0, maxHp);
+        if (currentHp <= 0)
+        {
+            EnterDeathState();
+            return;
+        }
+
+        isDying = false;
+        deathTimer = 0f;
+        animationBridge?.ResetState();
     }
 
     public bool Tick(float deltaTime, Vector3 playerPosition)
     {
+        if (isDying)
+        {
+            deathTimer -= deltaTime;
+            animationBridge?.SetRunning(false);
+            return deathTimer > 0f;
+        }
+
         attackCooldown -= deltaTime;
         moveSpeed = Mathf.Max(0.2f, baseMoveSpeed + owner.GetTerrainMoveSpeedModifier(transform.position));
 
@@ -91,9 +118,16 @@ public class EnemyActor : MonoBehaviour
             terrainDamageTimer = 0f;
         }
 
+        if (isDying || currentHp <= 0)
+        {
+            EnterDeathState();
+            return deathTimer > 0f;
+        }
+
         Vector2 toPlayer = playerPosition - transform.position;
         float distance = toPlayer.magnitude;
-        if (distance > 0.001f)
+        bool isRunning = distance > 0.05f;
+        if (isRunning)
         {
             transform.position += (Vector3)(toPlayer.normalized * moveSpeed * deltaTime);
             if (Mathf.Abs(toPlayer.x) > 0.01f)
@@ -102,6 +136,8 @@ public class EnemyActor : MonoBehaviour
                 transform.localScale = new Vector3(Mathf.Abs(transform.localScale.x) * sign, Mathf.Abs(transform.localScale.y), 1f);
             }
         }
+
+        animationBridge?.SetRunning(isRunning);
 
         if (distance <= contactRange + owner.PlayerHitRadius && attackCooldown <= 0f)
         {
@@ -114,6 +150,11 @@ public class EnemyActor : MonoBehaviour
 
     public bool TakeDamage(int damage, bool showDamageText = true)
     {
+        if (isDying || currentHp <= 0)
+        {
+            return false;
+        }
+
         int actualDamage = Mathf.Max(1, damage);
         currentHp = Mathf.Clamp(currentHp - actualDamage, 0, maxHp);
         if (showDamageText)
@@ -121,7 +162,28 @@ public class EnemyActor : MonoBehaviour
             owner?.SpawnDamageText(transform.position + new Vector3(0f, hitRadius * 0.8f, 0f), actualDamage, false);
         }
 
+        if (currentHp <= 0)
+        {
+            EnterDeathState();
+            return false;
+        }
+
         return currentHp > 0;
+    }
+
+    private void EnterDeathState()
+    {
+        if (isDying)
+        {
+            return;
+        }
+
+        isDying = true;
+        currentHp = 0;
+        attackCooldown = 0f;
+        deathTimer = DeathAnimationDuration;
+        animationBridge?.SetRunning(false);
+        animationBridge?.SetDying(true);
     }
 
     private void CacheSpriteRenderers()

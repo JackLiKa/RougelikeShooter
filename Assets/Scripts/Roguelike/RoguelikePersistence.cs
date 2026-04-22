@@ -107,17 +107,46 @@ public static class SessionSaveRepository
 
     public static void SaveSession(SessionSnapshotData snapshot)
     {
-        WriteSnapshot(GetSavePath(), snapshot);
+        TrySaveSession(snapshot, false, out _, out _);
     }
 
     public static void CreateManualSave(SessionSnapshotData snapshot)
     {
-        SaveSession(snapshot);
+        TryCreateManualSave(snapshot, out _);
+    }
 
-        string directory = GetManualSaveDirectory();
-        Directory.CreateDirectory(directory);
-        string fileName = $"save_{DateTime.Now:yyyyMMdd_HHmmss}_wave{Mathf.Max(1, snapshot.CurrentWave)}_{snapshot.PlayerType}_{snapshot.WeaponType}.bin";
-        WriteSnapshot(Path.Combine(directory, fileName), snapshot);
+    public static bool TrySaveSession(SessionSnapshotData snapshot, bool createManualBackup, out string continueSavePath, out string manualSavePath)
+    {
+        continueSavePath = GetSavePath();
+        manualSavePath = null;
+
+        if (snapshot == null)
+        {
+            Debug.LogError("Failed to save session: snapshot is null.");
+            return false;
+        }
+
+        try
+        {
+            WriteSnapshot(continueSavePath, snapshot);
+            if (createManualBackup)
+            {
+                TryCreateManualSave(snapshot, out manualSavePath);
+            }
+
+            Debug.Log($"Session saved successfully: {continueSavePath}");
+            if (!string.IsNullOrWhiteSpace(manualSavePath))
+            {
+                Debug.Log($"Manual backup saved successfully: {manualSavePath}");
+            }
+
+            return true;
+        }
+        catch (Exception exception)
+        {
+            Debug.LogError($"Failed to save session: {exception.Message}");
+            return false;
+        }
     }
 
     public static void ClearSavedSession()
@@ -210,6 +239,31 @@ public static class SessionSaveRepository
     public static void SelectSaveForLoad(string filePath)
     {
         pendingLoadPath = string.IsNullOrWhiteSpace(filePath) ? null : filePath;
+    }
+
+    private static bool TryCreateManualSave(SessionSnapshotData snapshot, out string manualSavePath)
+    {
+        manualSavePath = null;
+        if (snapshot == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            string directory = GetManualSaveDirectory();
+            Directory.CreateDirectory(directory);
+            string fileName = $"save_{DateTime.Now:yyyyMMdd_HHmmss}_wave{Mathf.Max(1, snapshot.CurrentWave)}_{snapshot.PlayerType}_{snapshot.WeaponType}.bin";
+            manualSavePath = Path.Combine(directory, fileName);
+            WriteSnapshot(manualSavePath, snapshot);
+            return true;
+        }
+        catch (Exception exception)
+        {
+            Debug.LogError($"Failed to create manual save: {exception.Message}");
+            manualSavePath = null;
+            return false;
+        }
     }
 
     private static void WriteSnapshot(string path, SessionSnapshotData snapshot)

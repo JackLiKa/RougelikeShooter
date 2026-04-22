@@ -1,2 +1,2 @@
 WaveDuration,BaseExpToLevel,ExpGrowthPerLevel,PickupRadius,RewindUsesPerRun,SnapshotInterval,SnapshotKeepCount,RewardGoldPerWave,RewardExpPerWave,SpawnMinDistance,SpawnMaxDistance,CardChoiceCount
-30,40,18,2.2,3,12,6,18,24,14,32,2
+30,44,22,2.2,3,12,6,18,24,14,32,2

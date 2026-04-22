@@ -27,7 +27,7 @@ public class Player1RunState:IPlayerState
         // myRigidbody=transform.GetComponent<Rigidbody2D>();
         // myAnimator=transform.GetComponent<Animator>();
         // myAnimator.SetBool("isRun",true);
-        m_Animator.SetBool("isRun",true);
+        animationBridge?.SetRunning(true);
 
     }
 
@@ -76,6 +76,6 @@ public class Player1RunState:IPlayerState
     {
         base.OnExit();
         // ✅ 设置动画
-        m_Animator.SetBool("isRun", false);
+        animationBridge?.SetRunning(false);
     }
 }
