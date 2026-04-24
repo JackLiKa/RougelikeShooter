@@ -80,8 +80,12 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
     private Text rewindText;
     private Text expHintText;
     private Text reloadHintText;
+    private Text skillNameText;
+    private Text skillStateText;
+    private Text skillCooldownText;
     private RectTransform expBarBackgroundRect;
     private RectTransform expFillRect;
+    private Image skillIconImage;
 
     private Text settlementWaveText;
     private Text settlementGoldText;
@@ -207,6 +211,7 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
         UpdateSmoothFill(expBarBackgroundRect, expFillRect, session.ExpRatio, ref displayedExpRatio, ref expBarInitialized);
         expHintText.text = $"\u7ecf\u9a8c\u503c {session.CurrentExp:0}/{session.ExpToNextLevel:0}    \u6309 R \u952e\u56de\u6eaf\u5230\u6700\u8fd1\u5feb\u7167";
         reloadHintText.text = session.IsReloading ? $"\u6362\u5f39\u4e2d {session.ReloadRemaining:0.0} \u79d2" : string.Empty;
+        RefreshSkillInfo(session);
 
         SetVisible(pauseOverlay, session.ShowPauseMenu && !session.ShowRewindCountdown);
         SetVisible(upgradeOverlay, session.ShowUpgradeChoices && !session.ShowRewindCountdown);
@@ -619,6 +624,7 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
         CreateText(terrainPanel, "TerrainTitle", 15, FontStyle.Bold, TextAnchor.UpperLeft, Accent, new Vector2(18f, -12f), new Vector2(324f, 18f)).text = "\u5730\u5f62\u589e\u76ca";
         terrainNameText = CreateText(terrainPanel, "TerrainName", 18, FontStyle.Bold, TextAnchor.UpperLeft, Color.white, new Vector2(18f, -38f), new Vector2(324f, 22f));
         terrainEffectText = CreateText(terrainPanel, "TerrainEffect", 13, FontStyle.Normal, TextAnchor.UpperLeft, SoftText, new Vector2(18f, -64f), new Vector2(324f, 24f));
+        BuildSkillPanel(root);
 
         RectTransform minimapPanel = CreatePanel(root, "MinimapPanel", new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(380f, 304f), new Vector2(-18f, 18f));
         CreateText(minimapPanel, "MinimapTitle", 18, FontStyle.Bold, TextAnchor.UpperLeft, Color.white, new Vector2(18f, -12f), new Vector2(224f, 20f)).text = "\u6218\u573a\u5730\u56fe";
@@ -630,6 +636,82 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
         CreateText(minimapPanel, "MinimapLegend", 12, FontStyle.Normal, TextAnchor.UpperLeft, SoftText, new Vector2(18f, -274f), new Vector2(328f, 14f)).text = "\u7eff\u8272 Player   \u7ea2\u8272\u602a\u7269   \u7d2b\u8272\u7cbe\u82f1";
 
         enemyBarLayer = CreateStretchRect(root, "EnemyBarLayer");
+    }
+
+    private void BuildSkillPanel(RectTransform root)
+    {
+        RectTransform skillPanel = CreatePanel(root, "SkillPanel", new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(140f, 166f), new Vector2(396f, -18f));
+        CreateText(skillPanel, "SkillTitle", 16, FontStyle.Bold, TextAnchor.MiddleCenter, Accent, new Vector2(0f, -10f), new Vector2(140f, 18f)).text = "\u4e3b\u52a8\u6280\u80fd";
+
+        RectTransform iconFrame = CreateColoredRect(
+            skillPanel,
+            "SkillIconFrame",
+            new Vector2(0.5f, 1f),
+            new Vector2(0.5f, 1f),
+            new Vector2(0.5f, 1f),
+            new Vector2(82f, 82f),
+            new Vector2(0f, -34f),
+            new Color(0.08f, 0.11f, 0.16f, 1f));
+        AddOutline(iconFrame.gameObject, CardBorder, new Vector2(1f, -1f));
+
+        RectTransform iconBackground = CreateColoredRect(
+            iconFrame,
+            "SkillIconBackground",
+            new Vector2(0.5f, 0.5f),
+            new Vector2(0.5f, 0.5f),
+            new Vector2(0.5f, 0.5f),
+            new Vector2(72f, 72f),
+            Vector2.zero,
+            new Color(0.14f, 0.18f, 0.24f, 1f));
+
+        GameObject iconObject = new GameObject("SkillIcon", typeof(RectTransform), typeof(Image));
+        iconObject.transform.SetParent(iconBackground, false);
+        RectTransform iconRect = iconObject.GetComponent<RectTransform>();
+        iconRect.anchorMin = new Vector2(0.5f, 0.5f);
+        iconRect.anchorMax = new Vector2(0.5f, 0.5f);
+        iconRect.pivot = new Vector2(0.5f, 0.5f);
+        iconRect.sizeDelta = new Vector2(64f, 64f);
+        iconRect.anchoredPosition = Vector2.zero;
+        skillIconImage = iconObject.GetComponent<Image>();
+        skillIconImage.preserveAspect = true;
+        skillIconImage.raycastTarget = false;
+
+        skillCooldownText = CreateText(skillPanel, "SkillCooldown", 26, FontStyle.Bold, TextAnchor.MiddleCenter, Color.white, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0.5f, 0.5f), new Vector2(0f, -72f), new Vector2(88f, 32f));
+        skillNameText = CreateText(skillPanel, "SkillName", 14, FontStyle.Bold, TextAnchor.MiddleCenter, Color.white, new Vector2(0f, -118f), new Vector2(140f, 18f));
+        skillStateText = CreateText(skillPanel, "SkillState", 11, FontStyle.Normal, TextAnchor.MiddleCenter, SoftText, new Vector2(10f, -138f), new Vector2(120f, 20f));
+    }
+
+    private void RefreshSkillInfo(RoguelikeGameManager session)
+    {
+        PlayerSkillProfile skillProfile = session.CurrentSkillProfile;
+        if (skillProfile == null || skillIconImage == null)
+        {
+            return;
+        }
+
+        Sprite icon = skillProfile.LoadIcon();
+        skillIconImage.sprite = icon;
+        skillIconImage.color = session.IsSkillReady
+            ? (icon != null ? Color.white : new Color(0.85f, 0.9f, 0.96f, 0.32f))
+            : new Color(0.62f, 0.68f, 0.74f, 0.92f);
+        skillNameText.text = skillProfile.SkillName;
+
+        if (session.IsSkillOnInfiniteCooldown)
+        {
+            skillCooldownText.text = "\u221e";
+            skillStateText.text = "\u88ab\u52a8\u5df2\u542f\u52a8";
+            return;
+        }
+
+        if (session.IsSkillReady)
+        {
+            skillCooldownText.text = "Q";
+            skillStateText.text = skillProfile.UsesAimDirection ? "Q \u91ca\u653e\uff0c\u9f20\u6807\u63a7\u5236\u65b9\u5411" : "Q \u91ca\u653e";
+            return;
+        }
+
+        skillCooldownText.text = Mathf.CeilToInt(session.SkillCooldownRemaining).ToString();
+        skillStateText.text = "\u51b7\u5374\u4e2d";
     }
 
     private void BuildPauseOverlay(RectTransform root)

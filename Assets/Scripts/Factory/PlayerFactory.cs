@@ -4,8 +4,8 @@ public enum PlayerType
 {
     Player1,
     Player2,
-    // Player3,
-    // Player4,
+    Player3,
+    Player4,
 }
 
 
@@ -34,6 +34,12 @@ public class PlayerFactory
                 break;
             case PlayerType.Player2:
                 player=new Player2(obj);
+                break;
+            case PlayerType.Player3:
+                player=new Player3(obj);
+                break;
+            case PlayerType.Player4:
+                player=new Player4(obj);
                 break;
             default:
                 return null;

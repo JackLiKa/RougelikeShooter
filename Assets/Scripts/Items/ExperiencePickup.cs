@@ -17,6 +17,7 @@ public class ExperiencePickup : MonoBehaviour
     private float pulseSeed;
     private float baseScale;
     private float magnetAnimation;
+    private bool forceLatched;
 
     public float PickupRadius { get; private set; }
     public float ExperienceValue => experienceValue;
@@ -33,6 +34,7 @@ public class ExperiencePickup : MonoBehaviour
         pulseSeed = Random.Range(0f, Mathf.PI * 2f);
         baseScale = scale;
         magnetAnimation = 0f;
+        forceLatched = false;
         transform.position = position;
         transform.localScale = new Vector3(scale, scale, 1f);
 
@@ -45,7 +47,7 @@ public class ExperiencePickup : MonoBehaviour
         }
     }
 
-    public bool Tick(float deltaTime, Vector3 playerPosition, float magnetRadius)
+    public bool Tick(float deltaTime, Vector3 playerPosition, float magnetRadius, float speedMultiplier)
     {
         pulseSeed += deltaTime * (grantsFreeLevel ? 5f : 3.5f);
         float pulseAmount = grantsFreeLevel ? 0.08f : 0.04f;
@@ -57,14 +59,25 @@ public class ExperiencePickup : MonoBehaviour
         float pickupTriggerDistance = PickupRadius + owner.PlayerHitRadius;
         float visualMagnetDistance = owner.PlayerHitRadius * MagnetVisualDistanceMultiplier;
         float attractionStartDistance = Mathf.Max(magnetRadius * MagnetRadiusMultiplier, pickupTriggerDistance + visualMagnetDistance);
+        bool isForcedMagnet = magnetRadius >= 900f || speedMultiplier > 1.01f;
+        if (isForcedMagnet && distance <= attractionStartDistance)
+        {
+            forceLatched = true;
+        }
+
+        if (forceLatched)
+        {
+            attractionStartDistance = float.MaxValue;
+        }
+
         if (distance <= attractionStartDistance && distance > 0.001f)
         {
             float travelRange = Mathf.Max(0.01f, attractionStartDistance - pickupTriggerDistance);
             float attractionRatio = 1f - Mathf.Clamp01((distance - pickupTriggerDistance) / travelRange);
-            float attractionSpeed = moveSpeed + (attractionRatio * attractionRatio * (grantsFreeLevel ? 30f : 22f));
+            float attractionSpeed = (moveSpeed + (attractionRatio * attractionRatio * (grantsFreeLevel ? 30f : 22f))) * Mathf.Max(1f, speedMultiplier);
             if (distance <= pickupTriggerDistance + owner.PlayerHitRadius)
             {
-                attractionSpeed += grantsFreeLevel ? 12f : 9f;
+                attractionSpeed += (grantsFreeLevel ? 12f : 9f) * Mathf.Max(1f, speedMultiplier);
             }
 
             magnetAnimation = Mathf.MoveTowards(magnetAnimation, 1f, deltaTime * 6f);

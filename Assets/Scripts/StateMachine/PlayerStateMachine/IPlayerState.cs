@@ -13,6 +13,7 @@ public abstract class IPlayerState:IState
     protected Rigidbody2D m_rb;
     protected Animator m_Animator;
     protected CharacterAnimationBridge animationBridge;
+    private Collider2D movementCollider;
     
     public IPlayerState(PlayerStateMachine machine):base(machine){ }
     protected override void OnInit()
@@ -33,6 +34,126 @@ public abstract class IPlayerState:IState
     protected bool CanReadPlayerInput()
     {
         return RoguelikeGameManager.Instance == null || RoguelikeGameManager.Instance.CanAcceptPlayerInput;
+    }
+
+    protected bool TryMove(Vector2 normalizedDirection, float moveSpeed)
+    {
+        if (normalizedDirection.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        Vector2 currentPosition = m_rb != null ? m_rb.position : (Vector2)transform.position;
+        Vector2 delta = normalizedDirection * moveSpeed * Time.deltaTime;
+        Vector2 resolvedPosition = ResolveMovement(currentPosition, delta);
+        bool hasMoved = (resolvedPosition - currentPosition).sqrMagnitude > 0.0001f;
+        if (!hasMoved)
+        {
+            return false;
+        }
+
+        if (m_rb != null)
+        {
+            m_rb.MovePosition(resolvedPosition);
+        }
+        else
+        {
+            transform.position = resolvedPosition;
+        }
+
+        return true;
+    }
+
+    private Vector2 ResolveMovement(Vector2 currentPosition, Vector2 delta)
+    {
+        Vector2 resolved = currentPosition;
+        Vector2 xTarget = resolved + new Vector2(delta.x, 0f);
+        if (!IsBlockedAt(xTarget))
+        {
+            resolved = xTarget;
+        }
+
+        Vector2 yTarget = resolved + new Vector2(0f, delta.y);
+        if (!IsBlockedAt(yTarget))
+        {
+            resolved = yTarget;
+        }
+
+        return resolved;
+    }
+
+    private bool IsBlockedAt(Vector2 rootPosition)
+    {
+        Collider2D collider = GetMovementCollider();
+        if (collider == null)
+        {
+            return false;
+        }
+
+        Vector2 centerOffset = (Vector2)collider.bounds.center - (Vector2)transform.position;
+        Vector2 overlapCenter = rootPosition + centerOffset;
+        Vector2 overlapSize = collider.bounds.size * 0.88f;
+        Collider2D[] hits = Physics2D.OverlapBoxAll(overlapCenter, overlapSize, 0f);
+        for (int index = 0; index < hits.Length; index++)
+        {
+            Collider2D hit = hits[index];
+            if (hit == null || hit.isTrigger)
+            {
+                continue;
+            }
+
+            if (hit.attachedRigidbody == m_rb || hit.transform.IsChildOf(transform) || transform.IsChildOf(hit.transform))
+            {
+                continue;
+            }
+
+            if (!ObstacleMarker.IsObstacle(hit))
+            {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    private Collider2D GetMovementCollider()
+    {
+        if (movementCollider != null)
+        {
+            return movementCollider;
+        }
+
+        Collider2D[] colliders = gameObject.GetComponentsInChildren<Collider2D>(true);
+        for (int index = 0; index < colliders.Length; index++)
+        {
+            Collider2D candidate = colliders[index];
+            if (candidate == null || candidate.isTrigger)
+            {
+                continue;
+            }
+
+            if (candidate.name == "Collider")
+            {
+                movementCollider = candidate;
+                return movementCollider;
+            }
+        }
+
+        for (int index = 0; index < colliders.Length; index++)
+        {
+            Collider2D candidate = colliders[index];
+            if (candidate == null || candidate.isTrigger)
+            {
+                continue;
+            }
+
+            movementCollider = candidate;
+            return movementCollider;
+        }
+
+        return null;
     }
 
 }

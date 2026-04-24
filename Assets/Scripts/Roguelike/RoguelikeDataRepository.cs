@@ -157,7 +157,7 @@ public static class RoguelikeDataRepository
                 DisplayName = "圣堂骑士",
                 MaxHp = 120,
                 Attack = 18,
-                MoveSpeed = 9.5f,
+                MoveSpeed = 18.5f,
                 ShootSpeed = 3f
             }
         },
@@ -170,8 +170,34 @@ public static class RoguelikeDataRepository
                 DisplayName = "游侠斥候",
                 MaxHp = 95,
                 Attack = 14,
-                MoveSpeed = 11.5f,
+                MoveSpeed = 20.5f,
                 ShootSpeed = 4.2f
+            }
+        },
+        {
+            PlayerType.Player3,
+            new PlayerProfile
+            {
+                PlayerType = PlayerType.Player3,
+                PlayerKey = "Player3",
+                DisplayName = "迅捷战士",
+                MaxHp = 120,
+                Attack = 20,
+                MoveSpeed = 18f,
+                ShootSpeed = 3.5f
+            }
+        },
+        {
+            PlayerType.Player4,
+            new PlayerProfile
+            {
+                PlayerType = PlayerType.Player4,
+                PlayerKey = "Player4",
+                DisplayName = "中分球皇",
+                MaxHp = 100,
+                Attack = 25,
+                MoveSpeed = 21.5f,
+                ShootSpeed = 2.5f
             }
         }
     };
@@ -273,7 +299,9 @@ public static class RoguelikeDataRepository
         EnsurePlayersLoaded();
         PlayerProfile profile = cachedPlayers.TryGetValue(playerType, out PlayerProfile loadedProfile)
             ? loadedProfile.Clone()
-            : FallbackPlayers[playerType].Clone();
+            : (FallbackPlayers.TryGetValue(playerType, out PlayerProfile fallbackProfile)
+                ? fallbackProfile.Clone()
+                : FallbackPlayers[PlayerType.Player1].Clone());
 
         float multiplier = UserProgressRepository.GetUpgradeMultiplier(playerType);
         profile.MaxHp = Mathf.Max(1, Mathf.RoundToInt(profile.MaxHp * multiplier));
@@ -502,7 +530,11 @@ public static class RoguelikeDataRepository
                 continue;
             }
 
-            PlayerProfile fallback = FallbackPlayers[playerType];
+            if (!FallbackPlayers.TryGetValue(playerType, out PlayerProfile fallback))
+            {
+                fallback = FallbackPlayers[PlayerType.Player1];
+            }
+
             cachedPlayers[playerType] = new PlayerProfile
             {
                 PlayerType = playerType,

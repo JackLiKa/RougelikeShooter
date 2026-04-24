@@ -105,6 +105,8 @@ public sealed class RoguelikeGameManager : MonoBehaviour
     private float nextAutoSaveTimer;
     private float reloadRemaining;
     private float activeSkillCooldownRemaining;
+    private float forcedPickupMagnetRemaining;
+    private float forcedPickupSpeedMultiplier = 1f;
     private float playerTerrainDamageTimer;
     private float playerHitRadius = 1.05f;
     private float expToNextLevel;
@@ -131,6 +133,12 @@ public sealed class RoguelikeGameManager : MonoBehaviour
     private bool wasPlayerInWaterLastFrame;
     private bool isPlayerDeathSequenceRunning;
     private int rewindCountdownValue;
+    private int skillBonusMaxHp;
+    private int skillBonusAttack;
+    private float skillBonusMoveSpeed;
+    private float skillBonusShootSpeed;
+
+    private PlayerSkillController skillController;
 
     private const float EnemySpawnDistanceMultiplier = 4f;
     private const float EnemyBaseHpMultiplier = 2.4f;
@@ -165,6 +173,10 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         : 1f;
     public float ReloadRemaining => reloadRemaining;
     public bool IsReloading => reloadRemaining > 0f;
+    public float SkillCooldownRemaining => activeSkillCooldownRemaining;
+    public bool IsSkillOnInfiniteCooldown => float.IsPositiveInfinity(activeSkillCooldownRemaining);
+    public bool IsSkillReady => !IsSkillOnInfiniteCooldown && activeSkillCooldownRemaining <= 0.01f;
+    public PlayerSkillProfile CurrentSkillProfile => PlayerSkillRepository.GetProfile(GameSelectionConfig.CurrentPlayerType);
     public int RewindUsesRemaining => rewindUsesRemaining;
     public bool IsPaused => isPaused;
     public bool ShowPauseMenu => showPauseMenu;
@@ -277,12 +289,23 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         }
 
         UpdateReload(Time.unscaledDeltaTime);
-        activeSkillCooldownRemaining = Mathf.Max(0f, activeSkillCooldownRemaining - Time.unscaledDeltaTime);
+        if (!float.IsPositiveInfinity(activeSkillCooldownRemaining))
+        {
+            activeSkillCooldownRemaining = Mathf.Max(0f, activeSkillCooldownRemaining - Time.unscaledDeltaTime);
+        }
+
+        forcedPickupMagnetRemaining = Mathf.Max(0f, forcedPickupMagnetRemaining - Time.unscaledDeltaTime);
+        if (forcedPickupMagnetRemaining <= 0f)
+        {
+            forcedPickupSpeedMultiplier = 1f;
+        }
 
         if (showPauseMenu || showUpgradeChoices || isPaused)
         {
             return;
         }
+
+        skillController?.Tick(Time.unscaledDeltaTime);
 
         float deltaTime = Time.deltaTime;
         elapsedTime += deltaTime;
@@ -347,6 +370,10 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         {
             QueueWave(currentWave);
         }
+
+        ObstacleMarker.ConfigureSceneObstacles();
+        skillController = PlayerSkillController.EnsureExists(gameObject);
+        skillController.Initialize(this, activePlayer, playerStats, GameSelectionConfig.CurrentPlayerType);
 
         initialized = true;
     }
@@ -456,6 +483,8 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         currentAmmo = weaponProfile.MaxAmmo;
         reloadRemaining = 0f;
         activeSkillCooldownRemaining = 0f;
+        forcedPickupMagnetRemaining = 0f;
+        forcedPickupSpeedMultiplier = 1f;
         playerTerrainDamageTimer = 0f;
         rewindUsesRemaining = inGameConfig.RewindUsesPerRun;
         elapsedTime = 0f;
@@ -480,6 +509,10 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         cardStacks.Clear();
         ownedPowerCards.Clear();
         currentCardChoices.Clear();
+        skillBonusMaxHp = 0;
+        skillBonusAttack = 0;
+        skillBonusMoveSpeed = 0f;
+        skillBonusShootSpeed = 0f;
         ReleaseAllBullets();
         ReleaseAllEnemies();
         ReleaseAllPickups();
@@ -741,6 +774,92 @@ public sealed class RoguelikeGameManager : MonoBehaviour
     {
         Time.timeScale = 1f;
         SceneManager.LoadScene("MainMenuScene");
+    }
+
+    public void SetSkillCooldown(float cooldown)
+    {
+        activeSkillCooldownRemaining = float.IsPositiveInfinity(cooldown) ? float.PositiveInfinity : Mathf.Max(0f, cooldown);
+    }
+
+    public void EnableForcedPickupMagnet(float duration, float speedMultiplier)
+    {
+        forcedPickupMagnetRemaining = Mathf.Max(forcedPickupMagnetRemaining, duration);
+        forcedPickupSpeedMultiplier = Mathf.Max(1f, speedMultiplier);
+    }
+
+    public void AddPermanentSkillBonuses(int maxHpBonus, int attackBonus, float moveSpeedBonus, float shootSpeedBonus)
+    {
+        skillBonusMaxHp += maxHpBonus;
+        skillBonusAttack += attackBonus;
+        skillBonusMoveSpeed += moveSpeedBonus;
+        skillBonusShootSpeed += shootSpeedBonus;
+        ApplyBonusesToPlayer();
+    }
+
+    public void SetTemporarySkillBonuses(int attackBonus, float moveSpeedBonus, float shootSpeedBonus)
+    {
+        skillBonusAttack = attackBonus;
+        skillBonusMoveSpeed = moveSpeedBonus;
+        skillBonusShootSpeed = shootSpeedBonus;
+        ApplyBonusesToPlayer();
+    }
+
+    public int GetActivePlayerSortingOrder()
+    {
+        SpriteRenderer renderer = activePlayer != null ? activePlayer.GetComponentInChildren<SpriteRenderer>(true) : null;
+        return renderer != null ? renderer.sortingOrder : 0;
+    }
+
+    public EnemyActor GetNearestEnemy(Vector2 origin, float maxDistance = float.MaxValue)
+    {
+        EnemyActor nearestEnemy = null;
+        float nearestDistanceSqr = maxDistance * maxDistance;
+        for (int index = 0; index < activeEnemies.Count; index++)
+        {
+            EnemyActor enemy = activeEnemies[index];
+            if (enemy == null || enemy.CurrentHp <= 0 || !enemy.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            float distanceSqr = (enemy.Position - origin).sqrMagnitude;
+            if (distanceSqr >= nearestDistanceSqr)
+            {
+                continue;
+            }
+
+            nearestDistanceSqr = distanceSqr;
+            nearestEnemy = enemy;
+        }
+
+        return nearestEnemy;
+    }
+
+    public void PerformLineSkillAttack(Vector2 direction, float range, float hitRadius, int damage)
+    {
+        if (activePlayer == null)
+        {
+            return;
+        }
+
+        Vector2 normalizedDirection = direction.sqrMagnitude <= 0.001f ? Vector2.right : direction.normalized;
+        Vector2 start = activePlayer.position;
+        Vector2 end = start + (normalizedDirection * Mathf.Max(1f, range));
+        for (int index = 0; index < activeEnemies.Count; index++)
+        {
+            EnemyActor enemy = activeEnemies[index];
+            if (enemy == null || enemy.CurrentHp <= 0 || !enemy.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            if (!SegmentCircleIntersects(start, end, enemy.Position, enemy.HitRadius + hitRadius, out _))
+            {
+                continue;
+            }
+
+            enemy.TakeDamage(Mathf.Max(1, damage));
+        }
     }
 
     public void QuitGameWithSave()
@@ -1153,11 +1272,12 @@ public sealed class RoguelikeGameManager : MonoBehaviour
 
     private void UpdatePickups(float deltaTime)
     {
-        float pickupRadius = inGameConfig.PickupRadius + sessionBonuses.BonusPickupRadius;
+        float pickupRadius = forcedPickupMagnetRemaining > 0f ? 999f : inGameConfig.PickupRadius + sessionBonuses.BonusPickupRadius;
+        float pickupSpeedMultiplier = forcedPickupMagnetRemaining > 0f ? forcedPickupSpeedMultiplier : 1f;
         Vector3 playerPosition = activePlayer.position;
         for (int index = activePickups.Count - 1; index >= 0; index--)
         {
-            if (activePickups[index].Tick(deltaTime, playerPosition, pickupRadius))
+            if (activePickups[index].Tick(deltaTime, playerPosition, pickupRadius, pickupSpeedMultiplier))
             {
                 continue;
             }
@@ -1307,10 +1427,10 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         }
 
         playerStats.ApplySessionBonuses(
-            sessionBonuses.BonusHp,
-            sessionBonuses.BonusAttack,
-            sessionBonuses.BonusMoveSpeed,
-            sessionBonuses.BonusShootRate);
+            sessionBonuses.BonusHp + skillBonusMaxHp,
+            sessionBonuses.BonusAttack + skillBonusAttack,
+            sessionBonuses.BonusMoveSpeed + skillBonusMoveSpeed,
+            sessionBonuses.BonusShootRate + skillBonusShootSpeed);
     }
 
     private void InitializeAdaptiveDifficulty()
@@ -1338,14 +1458,14 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         adaptiveDifficulty.Tick(deltaTime, playerLevel, CurrentFireRate, GetCurrentAttackPower());
     }
 
-    private int GetCurrentAttackPower()
+    public int GetCurrentAttackPower()
     {
         if (weaponProfile == null || playerStats == null)
         {
             return 1;
         }
 
-        return Mathf.Max(1, weaponProfile.Damage + playerStats.Attack + sessionBonuses.BonusAttack);
+        return Mathf.Max(1, weaponProfile.Damage + playerStats.Attack);
     }
 
     private void ResetPlayerAnimationState()

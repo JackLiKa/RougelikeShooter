@@ -269,7 +269,7 @@ public class PanelRoot : IPanel
             return cachedSprites;
         }
 
-        string previewFolder = playerType == PlayerType.Player2 ? "Player/player2" : "Player/player1";
+        string previewFolder = GameSelectionConfig.GetPlayerPreviewResourceFolder(playerType);
         string[] candidatePaths =
         {
             previewFolder + "/Idle-Sheet",

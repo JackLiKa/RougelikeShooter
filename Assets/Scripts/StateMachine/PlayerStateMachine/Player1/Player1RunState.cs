@@ -53,7 +53,7 @@ public class Player1RunState:IPlayerState
         moveDir.Set(hor,ver,0f);
         if(moveDir.magnitude>0)
         {
-            m_rb.transform.position += (Vector3)moveDir.normalized*moveSpeed*Time.deltaTime;
+            TryMove(moveDir.normalized, moveSpeed);
         }
         if(moveDir.magnitude==0)
         {
@@ -65,7 +65,7 @@ public class Player1RunState:IPlayerState
             isLeft=true;
             this.transform.localScale = new Vector3(-playerSize, playerSize, 1f);
         }
-        else
+        else if (hor > 0)
         {
             isLeft=false;
             this.transform.localScale = new Vector3(playerSize, playerSize, 1f);

@@ -14,7 +14,9 @@ public static class GameSelectionConfig
     public static readonly PlayerType[] AvailablePlayers =
     {
         PlayerType.Player1,
-        PlayerType.Player2
+        PlayerType.Player2,
+        PlayerType.Player3,
+        PlayerType.Player4
     };
 
     public static readonly WeaponType[] AvailableWeapons =
@@ -28,7 +30,7 @@ public static class GameSelectionConfig
         get
         {
             int value = PlayerPrefs.GetInt(PlayerTypeKey, (int)PlayerType.Player1);
-            return (PlayerType)Mathf.Clamp(value, (int)PlayerType.Player1, (int)PlayerType.Player2);
+            return (PlayerType)Mathf.Clamp(value, (int)PlayerType.Player1, (int)PlayerType.Player4);
         }
         set
         {
@@ -78,6 +80,22 @@ public static class GameSelectionConfig
     public static string GetPlayerObjectName(PlayerType playerType)
     {
         return playerType.ToString();
+    }
+
+    public static string GetPlayerPreviewResourceFolder(PlayerType playerType)
+    {
+        switch (playerType)
+        {
+            case PlayerType.Player2:
+                return "Player/player2";
+            case PlayerType.Player3:
+                return "Player/player3";
+            case PlayerType.Player4:
+                return "Player/player4";
+            case PlayerType.Player1:
+            default:
+                return "Player/player1";
+        }
     }
 
     public static string GetPlayerDisplayName(PlayerType playerType)

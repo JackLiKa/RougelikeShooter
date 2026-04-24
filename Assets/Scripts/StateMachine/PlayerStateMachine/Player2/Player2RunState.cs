@@ -46,7 +46,7 @@ public class Player2RunState : IPlayerState
 
         if (moveDir.magnitude > 0)
         {
-            m_rb.transform.position += (Vector3)moveDir.normalized * moveSpeed * Time.deltaTime;
+            TryMove(moveDir.normalized, moveSpeed);
         }
 
         if (moveDir.magnitude == 0)
@@ -59,7 +59,7 @@ public class Player2RunState : IPlayerState
         {
             transform.localScale = new Vector3(-playerSize, playerSize, 1f);
         }
-        else
+        else if (hor > 0)
         {
             transform.localScale = new Vector3(playerSize, playerSize, 1f);
         }

@@ -1,3 +1,5 @@
 PlayerType,DisplayName,MaxHp,Attack,MoveSpeed,ShootSpeed
-Player1,圣堂骑士,120,18,9.5,3.0
-Player2,游侠斥候,95,14,11.5,4.2
+Player1,西部牛仔,120,18,18.5,3.0
+Player2,阿尔法枪手,95,14,20.5,4.2
+Player3,迅捷战士,120,20,18.0,3.5
+Player4,中分球皇,100,25,21.5,2.5

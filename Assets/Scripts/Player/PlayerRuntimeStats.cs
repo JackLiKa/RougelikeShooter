@@ -21,6 +21,10 @@ public class PlayerRuntimeStats : MonoBehaviour
     public float MoveSpeed => Mathf.Max(0.1f, baseMoveSpeed + bonusMoveSpeed + environmentMoveSpeedModifier);
     public float ShootSpeed => Mathf.Max(0.1f, baseShootSpeed + bonusShootSpeed);
     public float HealthRatio => MaxHp <= 0 ? 0f : (float)CurrentHp / MaxHp;
+    public int BaseMaxHp => Mathf.Max(1, baseMaxHp);
+    public int BaseAttack => Mathf.Max(1, baseAttack);
+    public float BaseMoveSpeed => Mathf.Max(0.1f, baseMoveSpeed);
+    public float BaseShootSpeed => Mathf.Max(0.1f, baseShootSpeed);
 
     public void ApplyProfile(PlayerProfile profile)
     {

@@ -22,6 +22,7 @@ namespace CharacterPanelScene
         private static readonly Color DimOverlay = new Color(0f, 0f, 0f, 0.48f);
 
         private readonly Dictionary<PlayerType, Sprite[]> idlePreviewCache = new Dictionary<PlayerType, Sprite[]>();
+        private readonly Dictionary<PlayerType, Sprite> skillIconCache = new Dictionary<PlayerType, Sprite>();
         private readonly Dictionary<WeaponType, Texture2D> weaponPreviewCache = new Dictionary<WeaponType, Texture2D>();
 
         private bool showReturnConfirm;
@@ -85,8 +86,7 @@ namespace CharacterPanelScene
 
             Rect previewRect = new Rect(rect.x + 34f, rect.y + 124f, rect.width - 68f, 418f);
             DrawPreview(previewRect, playerType);
-
-            DrawCompatibleLabel(new Rect(rect.x + 26f, rect.y + 564f, rect.width - 52f, 90f), "\u8fd9\u91cc\u4f1a\u663e\u793a\u5f53\u524d\u89d2\u8272\u548c\u624b\u6301\u6b66\u5668\u7684 Idle \u52a8\u753b\u3002\u8fdb\u5165\u6e38\u620f\u524d\uff0c\u53ef\u5148\u5728\u8fd9\u91cc\u6838\u5bf9\u89d2\u8272\u5f62\u8c61\u548c\u6b66\u5668\u9009\u62e9\u3002", CreateLabelStyle(16, FontStyle.Normal, TextAnchor.UpperLeft, SoftText));
+            DrawSkillPreview(rect, playerType);
 
             if (DrawButton(new Rect(rect.x + 24f, rect.y + rect.height - 78f, 186f, 44f), "\u4e0a\u4e00\u89d2\u8272"))
             {
@@ -208,7 +208,7 @@ namespace CharacterPanelScene
                 return cachedSprites;
             }
 
-            string previewFolder = playerType == PlayerType.Player2 ? "Player/player2" : "Player/player1";
+            string previewFolder = GameSelectionConfig.GetPlayerPreviewResourceFolder(playerType);
             string[] candidatePaths =
             {
                 previewFolder + "/Idle-Sheet",
@@ -347,6 +347,40 @@ namespace CharacterPanelScene
             Texture2D texture = Resources.Load<Texture2D>("Images/Weapon/" + GameSelectionConfig.GetWeaponObjectName(weaponType));
             weaponPreviewCache[weaponType] = texture;
             return texture;
+        }
+
+        private void DrawSkillPreview(Rect cardRect, PlayerType playerType)
+        {
+            PlayerSkillProfile skillProfile = PlayerSkillRepository.GetProfile(playerType);
+            Rect skillRect = new Rect(cardRect.x + 24f, cardRect.y + 560f, cardRect.width - 48f, 104f);
+            DrawFilledRect(skillRect, new Color(0.05f, 0.07f, 0.1f, 0.96f));
+            DrawBorder(skillRect, CardBorder, 2f);
+            DrawCompatibleLabel(new Rect(skillRect.x + 16f, skillRect.y + 10f, skillRect.width - 32f, 20f), "专属技能", CreateLabelStyle(16, FontStyle.Bold, TextAnchor.UpperLeft, Accent));
+
+            Sprite icon = GetSkillIcon(playerType);
+            Rect iconRect = new Rect(skillRect.x + 16f, skillRect.y + 38f, 56f, 56f);
+            DrawFilledRect(iconRect, new Color(0.11f, 0.16f, 0.21f, 1f));
+            DrawBorder(iconRect, Accent, 1.5f);
+            if (icon != null)
+            {
+                DrawSprite(iconRect, icon);
+            }
+
+            string cooldownText = skillProfile.InfiniteCooldown ? "∞" : skillProfile.Cooldown.ToString("0.#") + " 秒";
+            DrawCompatibleLabel(new Rect(skillRect.x + 84f, skillRect.y + 36f, skillRect.width - 96f, 22f), $"{skillProfile.SkillName}  |  冷却 {cooldownText}", CreateLabelStyle(16, FontStyle.Bold, TextAnchor.UpperLeft, Color.white));
+            DrawCompatibleLabel(new Rect(skillRect.x + 84f, skillRect.y + 60f, skillRect.width - 96f, 42f), skillProfile.Description, CreateLabelStyle(14, FontStyle.Normal, TextAnchor.UpperLeft, SoftText));
+        }
+
+        private Sprite GetSkillIcon(PlayerType playerType)
+        {
+            if (skillIconCache.TryGetValue(playerType, out Sprite cachedIcon))
+            {
+                return cachedIcon;
+            }
+
+            cachedIcon = PlayerSkillRepository.GetProfile(playerType).LoadIcon();
+            skillIconCache[playerType] = cachedIcon;
+            return cachedIcon;
         }
 
         private GUIStyle CreateLabelStyle(int fontSize, FontStyle fontStyle, TextAnchor anchor, Color color)
