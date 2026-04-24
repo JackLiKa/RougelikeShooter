@@ -62,11 +62,13 @@ public sealed class FloatingDamageText : MonoBehaviour
 
         textMesh.anchor = TextAnchor.MiddleCenter;
         textMesh.alignment = TextAlignment.Center;
-        textMesh.characterSize = 0.12f;
-        textMesh.fontSize = 48;
+        textMesh.characterSize = 1.15f;
+        textMesh.fontSize = 64;
         textMesh.fontStyle = FontStyle.Bold;
         textMesh.richText = false;
-        textMesh.GetComponent<MeshRenderer>().sortingOrder = 300;
+        MeshRenderer meshRenderer = textMesh.GetComponent<MeshRenderer>();
+        meshRenderer.sortingLayerName = "Default";
+        meshRenderer.sortingOrder = 5000;
         return textMesh;
     }
 }

@@ -3,9 +3,12 @@ using UnityEngine;
 
 public class Bullet : MonoBehaviour
 {
+    private const int BulletSortingOrder = 20;
+
     private readonly HashSet<int> hitEnemyIds = new HashSet<int>();
 
     private RoguelikeGameManager owner;
+    private SpriteRenderer spriteRenderer;
     private Vector2 direction;
     private Vector2 previousPosition;
     private float speed;
@@ -43,6 +46,7 @@ public class Bullet : MonoBehaviour
         remainingPierce = pierce;
         hitRadius = Mathf.Max(0.25f, scale * 0.45f);
         hitEnemyIds.Clear();
+        EnsureVisibleRenderer();
 
         transform.position = startPosition;
         previousPosition = startPosition;
@@ -93,5 +97,21 @@ public class Bullet : MonoBehaviour
         }
 
         hitEnemyIds.Add(enemy.GetInstanceID());
+    }
+
+    private void EnsureVisibleRenderer()
+    {
+        if (spriteRenderer == null)
+        {
+            spriteRenderer = GetComponent<SpriteRenderer>();
+        }
+
+        if (spriteRenderer == null)
+        {
+            return;
+        }
+
+        spriteRenderer.enabled = true;
+        spriteRenderer.sortingOrder = BulletSortingOrder;
     }
 }

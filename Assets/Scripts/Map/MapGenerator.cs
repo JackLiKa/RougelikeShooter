@@ -22,6 +22,8 @@ public enum TerrainSurfaceType
 
 public class MapGenerator : MonoBehaviour
 {
+    private const int GroundTilemapSortingOrder = -2;
+    private const int ItemTilemapSortingOrder = -1;
 
 
     void Start()
@@ -65,9 +67,14 @@ public class MapGenerator : MonoBehaviour
     private float[,] mapData;//地图数组True：ground False：water
     public void GenerateMap()
     {
-        itemSpawnDatas.Sort((data1,data2)=>{
-            return data1.weight.CompareTo(data2.weight);
-        });
+        if (itemSpawnDatas != null)
+        {
+            itemSpawnDatas.Sort((data1,data2)=>{
+                int leftWeight = data1 != null ? data1.weight : 0;
+                int rightWeight = data2 != null ? data2.weight : 0;
+                return leftWeight.CompareTo(rightWeight);
+            });
+        }
         Debug.Log("GenerateMap - 生成地图");
         GeneratorMapData();
         //TODO:地图处理
@@ -86,8 +93,15 @@ public class MapGenerator : MonoBehaviour
     public void CleanMap()
     {
         Debug.Log("CleanMap - 清理地图");
-        groundTilemap.ClearAllTiles();
-        itemTilemap.ClearAllTiles();
+        if (groundTilemap != null)
+        {
+            groundTilemap.ClearAllTiles();
+        }
+
+        if (itemTilemap != null)
+        {
+            itemTilemap.ClearAllTiles();
+        }
     }
 
     private void GeneratorMapData()
@@ -308,10 +322,136 @@ public class MapGenerator : MonoBehaviour
         return foundGrass ? bestGrassPosition : bestGroundPosition;
     }
 
+    public bool TryGetWorldBounds(out Bounds worldBounds)
+    {
+        worldBounds = default;
+        if (groundTilemap == null || width <= 0 || height <= 0)
+        {
+            return false;
+        }
+
+        Vector3 worldMin = groundTilemap.CellToWorld(new Vector3Int(0, 0, 0));
+        Vector3 worldMax = groundTilemap.CellToWorld(new Vector3Int(width, height, 0));
+        worldBounds.SetMinMax(Vector3.Min(worldMin, worldMax), Vector3.Max(worldMin, worldMax));
+        return worldBounds.size.x > 0f && worldBounds.size.y > 0f;
+    }
+
 
     private void GeneratorTileMap()
     {
+        if (groundTilemap == null)
+        {
+            Debug.LogError("MapGenerator requires a ground Tilemap.");
+            return;
+        }
+
         CleanMap();
+        ConfigureItemTilemapRenderer();
+
+        for (int x = 0; x < width; x++)
+        {
+            for (int y = 0; y < height; y++)
+            {
+                TileBase tile = IsGround(x, y) ? groundTile : waterTile;
+                groundTilemap.SetTile(new Vector3Int(x, y, 0), tile);
+            }
+        }
+
+        if (itemTilemap == null)
+        {
+            Debug.LogWarning("MapGenerator itemTilemap is not assigned; item spawn tiles will not be shown.");
+            return;
+        }
+
+        List<ItemSpawnData> validItemSpawnDatas = new List<ItemSpawnData>();
+        int weightTotal = 0;
+        if (itemSpawnDatas != null)
+        {
+            for (int index = 0; index < itemSpawnDatas.Count; index++)
+            {
+                ItemSpawnData spawnData = itemSpawnDatas[index];
+                if (spawnData == null || spawnData.weight <= 0 || spawnData.tile == null)
+                {
+                    continue;
+                }
+
+                validItemSpawnDatas.Add(spawnData);
+                weightTotal += spawnData.weight;
+            }
+        }
+
+        if (weightTotal <= 0 || validItemSpawnDatas.Count == 0)
+        {
+            Debug.LogWarning("MapGenerator has no valid Item Spawn Datas; assign positive weights and non-null tiles.");
+            return;
+        }
+
+        for (int x = 0; x < width; x++)
+        {
+            for (int y = 0; y < height; y++)
+            {
+                if (!IsGround(x, y) || GetEightNeighborsGroundCount(x, y) < 8)
+                {
+                    continue;
+                }
+
+                int randomValue = UnityEngine.Random.Range(0, weightTotal);
+                int accumulatedWeight = 0;
+                for (int index = 0; index < validItemSpawnDatas.Count; index++)
+                {
+                    ItemSpawnData spawnData = validItemSpawnDatas[index];
+                    accumulatedWeight += spawnData.weight;
+                    if (randomValue >= accumulatedWeight)
+                    {
+                        continue;
+                    }
+
+                    itemTilemap.SetTile(new Vector3Int(x, y, 0), spawnData.tile);
+                    break;
+                }
+            }
+        }
+
+        itemTilemap.RefreshAllTiles();
+    }
+
+
+    private void ConfigureItemTilemapRenderer()
+    {
+        if (itemTilemap == null)
+        {
+            return;
+        }
+
+        TilemapRenderer itemRenderer = itemTilemap.GetComponent<TilemapRenderer>();
+        if (itemRenderer == null)
+        {
+            return;
+        }
+
+        TilemapRenderer groundRenderer = groundTilemap != null ? groundTilemap.GetComponent<TilemapRenderer>() : null;
+        if (groundRenderer != null)
+        {
+            itemRenderer.sortingLayerID = groundRenderer.sortingLayerID;
+            groundRenderer.sortingOrder = GroundTilemapSortingOrder;
+            itemRenderer.sortingOrder = ItemTilemapSortingOrder;
+            return;
+        }
+
+        itemRenderer.sortingOrder = ItemTilemapSortingOrder;
+    }
+
+
+    private void GeneratorTileMapLegacy()
+    {
+        if (groundTilemap == null)
+        {
+            Debug.LogError("MapGenerator requires a ground Tilemap.");
+            return;
+        }
+
+        CleanMap();
+        ConfigureItemTilemapRenderer();
 
 
         //生成地面
@@ -326,9 +466,32 @@ public class MapGenerator : MonoBehaviour
 
 
         //生成物品
+        if (itemTilemap == null)
+        {
+            Debug.LogWarning("MapGenerator itemTilemap is not assigned; item spawn tiles will not be shown.");
+            return;
+        }
+
+        List<ItemSpawnData> validItemSpawnDatas = new List<ItemSpawnData>();
         int weightTotal=0;
-        for(int i=0;i<itemSpawnDatas.Count;i++){
-            weightTotal+=itemSpawnDatas[i].weight;
+        if (itemSpawnDatas != null)
+        {
+            for(int i=0;i<itemSpawnDatas.Count;i++){
+                ItemSpawnData spawnData = itemSpawnDatas[i];
+                if (spawnData == null || spawnData.weight <= 0 || spawnData.tile == null)
+                {
+                    continue;
+                }
+
+                validItemSpawnDatas.Add(spawnData);
+                weightTotal+=spawnData.weight;
+            }
+        }
+
+        if (weightTotal <= 0 || validItemSpawnDatas.Count == 0)
+        {
+            Debug.LogWarning("MapGenerator has no valid Item Spawn Datas; assign positive weights and non-null tiles.");
+            return;
         }
 
         for(int x=0;x<width;x++){

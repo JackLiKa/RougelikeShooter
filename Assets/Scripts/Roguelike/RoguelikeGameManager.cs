@@ -144,6 +144,7 @@ public sealed class RoguelikeGameManager : MonoBehaviour
     private const float EnemyWaveAttackIntervalReduction = 0.035f;
     private const float EnemyWaveContactRangeGain = 0.035f;
     private const float EnemyWaveScaleGain = 0.012f;
+    private const int MaxAdditionalVolleyCount = 2;
 
     public PlayerRuntimeStats PlayerStats => playerStats;
     public float PlayerHitRadius => playerHitRadius;
@@ -157,7 +158,7 @@ public sealed class RoguelikeGameManager : MonoBehaviour
     public int CurrentAmmo => currentAmmo;
     public int MaxAmmo => weaponProfile != null ? weaponProfile.MaxAmmo : 0;
     public int CurrentExtraPierce => Mathf.Max(0, (weaponProfile != null ? weaponProfile.Pierce : 0) + sessionBonuses.BonusPierce);
-    public int CurrentVolleyCount => 1 + Mathf.Max(0, sessionBonuses.BonusProjectileCount + sessionBonuses.BonusVolleyCount);
+    public int CurrentVolleyCount => 1 + Mathf.Clamp(sessionBonuses.BonusProjectileCount + sessionBonuses.BonusVolleyCount, 0, MaxAdditionalVolleyCount);
     public int CurrentBurstCount => 1 + Mathf.Max(0, sessionBonuses.BonusBurstCount);
     public float CurrentFireRate => weaponProfile != null
         ? Mathf.Max(0.1f, weaponProfile.ShootRate + (playerStats != null ? playerStats.ShootSpeed * 0.25f : 0f))
@@ -192,22 +193,24 @@ public sealed class RoguelikeGameManager : MonoBehaviour
     public int CurrentPlayerUpgradeLevel => UserProgressRepository.GetUpgradeLevel(GameSelectionConfig.CurrentPlayerType);
     public Vector2 PlayerPosition => activePlayer != null ? activePlayer.position : Vector2.zero;
     public TerrainSurfaceType CurrentPlayerTerrainType => activePlayer != null ? GetTerrainType(activePlayer.position) : TerrainSurfaceType.Ground;
-    public float MapMinX => mapConfig != null ? mapConfig.MinX : -1f;
-    public float MapMaxX => mapConfig != null ? mapConfig.MaxX : 1f;
-    public float MapMinY => mapConfig != null ? mapConfig.MinY : -1f;
-    public float MapMaxY => mapConfig != null ? mapConfig.MaxY : 1f;
+    public float MapMinX => TryGetPlayableMapBounds(out float minX, out _, out _, out _) ? minX : -1f;
+    public float MapMaxX => TryGetPlayableMapBounds(out _, out float maxX, out _, out _) ? maxX : 1f;
+    public float MapMinY => TryGetPlayableMapBounds(out _, out _, out float minY, out _) ? minY : -1f;
+    public float MapMaxY => TryGetPlayableMapBounds(out _, out _, out _, out float maxY) ? maxY : 1f;
 
     public bool IsInsideMapBounds(Vector2 point, float padding = 0f)
     {
-        if (mapConfig == null)
+        if (!TryGetPlayableMapBounds(out float minX, out float maxX, out float minY, out float maxY))
         {
             return true;
         }
 
-        return point.x >= mapConfig.MinX + padding
-            && point.x <= mapConfig.MaxX - padding
-            && point.y >= mapConfig.MinY + padding
-            && point.y <= mapConfig.MaxY - padding;
+        float safePaddingX = Mathf.Min(Mathf.Max(0f, padding), Mathf.Max(0f, (maxX - minX) * 0.5f));
+        float safePaddingY = Mathf.Min(Mathf.Max(0f, padding), Mathf.Max(0f, (maxY - minY) * 0.5f));
+        return point.x >= minX + safePaddingX
+            && point.x <= maxX - safePaddingX
+            && point.y >= minY + safePaddingY
+            && point.y <= maxY - safePaddingY;
     }
 
     public int GetCardStack(string cardKey)
@@ -603,7 +606,10 @@ public sealed class RoguelikeGameManager : MonoBehaviour
             }
 
             bullet.RegisterEnemyHit(targetEnemy);
-            targetEnemy.TakeDamage(bullet.Damage);
+            Vector3 hitPosition = Vector3.Lerp(segmentStart, segmentEnd, hitInfos[index].HitT);
+            Vector3 textPosition = hitPosition + new Vector3(0f, Mathf.Max(1.2f, targetEnemy.HitRadius * 0.55f), 0f);
+            targetEnemy.TakeDamage(bullet.Damage, false);
+            SpawnDamageText(textPosition, bullet.Damage, false);
 
             if (bullet.RemainingPierce <= 0)
             {
@@ -896,7 +902,7 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         }
 
         RecalculateCardBonuses();
-        activePlayer.position = new Vector3(snapshot.PlayerPositionX, snapshot.PlayerPositionY, 0f);
+        activePlayer.position = ClampToPlayableMapBounds(new Vector3(snapshot.PlayerPositionX, snapshot.PlayerPositionY, 0f), playerHitRadius);
         playerStats.SetCurrentHp(snapshot.PlayerHp);
         isPlayerDeathSequenceRunning = false;
         ResetPlayerAnimationState();
@@ -1199,16 +1205,17 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         List<PowerCardData> candidates = new List<PowerCardData>();
         for (int index = 0; index < allCards.Count; index++)
         {
-            int stackCount = cardStacks.TryGetValue(allCards[index].CardKey, out int value) ? value : 0;
-            if (stackCount >= allCards[index].MaxStacks)
+            PowerCardData card = allCards[index];
+            int stackCount = cardStacks.TryGetValue(card.CardKey, out int value) ? value : 0;
+            if (stackCount >= card.MaxStacks || IsPowerCardAtGlobalCap(card))
             {
                 continue;
             }
 
-            int weight = Mathf.Max(1, allCards[index].Weight);
+            int weight = Mathf.Max(1, card.Weight);
             for (int repeat = 0; repeat < weight; repeat++)
             {
-                candidates.Add(allCards[index]);
+                candidates.Add(card);
             }
         }
 
@@ -1274,6 +1281,22 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         ownedPowerCards.Sort((left, right) => string.CompareOrdinal(left.Card?.Title, right.Card?.Title));
 
         ApplyBonusesToPlayer();
+    }
+
+    private bool IsPowerCardAtGlobalCap(PowerCardData card)
+    {
+        if (card == null)
+        {
+            return true;
+        }
+
+        if (card.BonusProjectileCount <= 0 && card.BonusVolleyCount <= 0)
+        {
+            return false;
+        }
+
+        int additionalVolleyCount = sessionBonuses.BonusProjectileCount + sessionBonuses.BonusVolleyCount;
+        return additionalVolleyCount >= MaxAdditionalVolleyCount;
     }
 
     private void ApplyBonusesToPlayer()
@@ -1450,6 +1473,7 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         Vector3 playerPosition = activePlayer.position;
         float minDistance = Mathf.Max(0.5f, inGameConfig.SpawnMinDistance * EnemySpawnDistanceMultiplier);
         float maxDistance = Mathf.Max(minDistance + 0.5f, inGameConfig.SpawnMaxDistance * EnemySpawnDistanceMultiplier);
+        float safeMargin = mapConfig != null ? mapConfig.SafeMargin : 0f;
         for (int attempt = 0; attempt < 12; attempt++)
         {
             Vector2 direction = Random.insideUnitCircle.normalized;
@@ -1460,8 +1484,7 @@ public sealed class RoguelikeGameManager : MonoBehaviour
 
             float distance = Random.Range(minDistance, maxDistance);
             Vector3 position = playerPosition + (Vector3)(direction * distance);
-            position.x = Mathf.Clamp(position.x, mapConfig.MinX + mapConfig.SafeMargin, mapConfig.MaxX - mapConfig.SafeMargin);
-            position.y = Mathf.Clamp(position.y, mapConfig.MinY + mapConfig.SafeMargin, mapConfig.MaxY - mapConfig.SafeMargin);
+            position = ClampToPlayableMapBounds(position, safeMargin);
 
             float actualDistance = Vector2.Distance(position, playerPosition);
             if (actualDistance >= minDistance - 0.5f && actualDistance <= maxDistance + 0.5f)
@@ -1471,24 +1494,69 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         }
 
         Vector3 fallback = new Vector3(playerPosition.x + minDistance, playerPosition.y, 0f);
-        fallback.x = Mathf.Clamp(fallback.x, mapConfig.MinX + mapConfig.SafeMargin, mapConfig.MaxX - mapConfig.SafeMargin);
-        fallback.y = Mathf.Clamp(fallback.y, mapConfig.MinY + mapConfig.SafeMargin, mapConfig.MaxY - mapConfig.SafeMargin);
-        return fallback;
+        return ClampToPlayableMapBounds(fallback, safeMargin);
     }
 
     private Vector3 GetInitialPlayerSpawnPosition()
     {
-        Vector3 fallback = new Vector3((mapConfig.MinX + mapConfig.MaxX) * 0.5f, (mapConfig.MinY + mapConfig.MaxY) * 0.5f, 0f);
+        Vector3 fallback = TryGetPlayableMapBounds(out float minX, out float maxX, out float minY, out float maxY)
+            ? new Vector3((minX + maxX) * 0.5f, (minY + maxY) * 0.5f, 0f)
+            : Vector3.zero;
         if (mapGenerator == null)
         {
             mapGenerator = FindAnyObjectByType<MapGenerator>();
         }
 
         Vector3 spawnPosition = mapGenerator != null ? mapGenerator.FindGrassSpawnPosition(fallback) : fallback;
-        spawnPosition.x = Mathf.Clamp(spawnPosition.x, mapConfig.MinX + mapConfig.SafeMargin, mapConfig.MaxX - mapConfig.SafeMargin);
-        spawnPosition.y = Mathf.Clamp(spawnPosition.y, mapConfig.MinY + mapConfig.SafeMargin, mapConfig.MaxY - mapConfig.SafeMargin);
-        spawnPosition.z = 0f;
-        return spawnPosition;
+        return ClampToPlayableMapBounds(spawnPosition, mapConfig != null ? mapConfig.SafeMargin : 0f);
+    }
+
+    private Vector3 ClampToPlayableMapBounds(Vector3 position, float padding = 0f)
+    {
+        if (!TryGetPlayableMapBounds(out float minX, out float maxX, out float minY, out float maxY))
+        {
+            position.z = 0f;
+            return position;
+        }
+
+        float safePaddingX = Mathf.Min(Mathf.Max(0f, padding), Mathf.Max(0f, (maxX - minX) * 0.5f));
+        float safePaddingY = Mathf.Min(Mathf.Max(0f, padding), Mathf.Max(0f, (maxY - minY) * 0.5f));
+        position.x = Mathf.Clamp(position.x, minX + safePaddingX, maxX - safePaddingX);
+        position.y = Mathf.Clamp(position.y, minY + safePaddingY, maxY - safePaddingY);
+        position.z = 0f;
+        return position;
+    }
+
+    private bool TryGetPlayableMapBounds(out float minX, out float maxX, out float minY, out float maxY)
+    {
+        if (mapGenerator == null)
+        {
+            mapGenerator = FindAnyObjectByType<MapGenerator>();
+        }
+
+        if (mapGenerator != null && mapGenerator.TryGetWorldBounds(out Bounds worldBounds))
+        {
+            minX = worldBounds.min.x;
+            maxX = worldBounds.max.x;
+            minY = worldBounds.min.y;
+            maxY = worldBounds.max.y;
+            return true;
+        }
+
+        if (mapConfig != null)
+        {
+            minX = mapConfig.MinX;
+            maxX = mapConfig.MaxX;
+            minY = mapConfig.MinY;
+            maxY = mapConfig.MaxY;
+            return true;
+        }
+
+        minX = -1f;
+        maxX = 1f;
+        minY = -1f;
+        maxY = 1f;
+        return false;
     }
 
     private void BeginReload()

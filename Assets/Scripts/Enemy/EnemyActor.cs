@@ -65,14 +65,15 @@ public class EnemyActor : MonoBehaviour
         baseMoveSpeed = Mathf.Max(0.2f, moveSpeed);
         this.moveSpeed = baseMoveSpeed;
         this.attackInterval = Mathf.Max(0.2f, attackInterval);
-        this.contactRange = Mathf.Max(0.5f, contactRange);
+        float collisionScale = GetCollisionScale(sourceProfile);
+        this.contactRange = Mathf.Max(0.5f, contactRange * collisionScale);
         this.isElite = isElite;
         attackCooldown = 0f;
         terrainDamageTimer = 0f;
         isDying = false;
         deathTimer = 0f;
         transform.localScale = new Vector3(scale, scale, 1f);
-        hitRadius = CalculateVisualHitRadius(scale);
+        hitRadius = Mathf.Max(0.5f, CalculateVisualHitRadius(scale) * collisionScale);
         visualHalfHeight = CalculateVisualHalfHeight(scale);
         animationBridge?.ResetState();
     }
@@ -241,5 +242,13 @@ public class EnemyActor : MonoBehaviour
         }
 
         return hasBounds;
+    }
+
+    private static float GetCollisionScale(EnemyProfile sourceProfile)
+    {
+        return sourceProfile != null
+            && string.Equals(sourceProfile.EnemyKey, "DireEnemy1", System.StringComparison.OrdinalIgnoreCase)
+            ? 0.75f
+            : 1f;
     }
 }
