@@ -53,12 +53,14 @@ public class Bullet : MonoBehaviour
         transform.localScale = new Vector3(scale * 5f, scale * 5f, 1f);
         float angle = Mathf.Atan2(this.direction.y, this.direction.x) * Mathf.Rad2Deg;
         transform.rotation = Quaternion.Euler(0f, 0f, angle);
+        RefreshOcclusionVisibility();
     }
 
     public bool Tick(float deltaTime)
     {
         previousPosition = transform.position;
         transform.position += (Vector3)(direction * speed * deltaTime);
+        RefreshOcclusionVisibility();
 
         remainingLifetime -= deltaTime;
         if (remainingLifetime <= 0f)
@@ -113,5 +115,37 @@ public class Bullet : MonoBehaviour
 
         spriteRenderer.enabled = true;
         spriteRenderer.sortingOrder = BulletSortingOrder;
+    }
+
+    private void RefreshOcclusionVisibility()
+    {
+        if (spriteRenderer == null)
+        {
+            return;
+        }
+
+        IReadOnlyList<StoneStatueEffect> statues = StoneStatueEffect.ActiveStatues;
+        bool isOccluded = false;
+        for (int index = 0; index < statues.Count; index++)
+        {
+            StoneStatueEffect statue = statues[index];
+            if (statue == null || !statue.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            if (!statue.ShouldOccludePoint(Position, hitRadius))
+            {
+                continue;
+            }
+
+            isOccluded = true;
+            break;
+        }
+
+        if (spriteRenderer.enabled == isOccluded)
+        {
+            spriteRenderer.enabled = !isOccluded;
+        }
     }
 }

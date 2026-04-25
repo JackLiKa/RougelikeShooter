@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 public class Ak47 : MonoBehaviour
@@ -10,6 +11,7 @@ public class Ak47 : MonoBehaviour
     private Vector2 gunDirection = Vector2.right;
     private Transform playerTransform;
     private SpriteRenderer spriteRenderer;
+    private SpriteRenderer playerBodyRenderer;
     private Vector3 baseLocalScale;
     private float nextShootTime;
 
@@ -34,7 +36,9 @@ public class Ak47 : MonoBehaviour
         }
 
         RefreshCameraReference();
+        SyncSortingWithPlayer();
         UpdateDirection();
+        UpdateOcclusionVisibility();
         TryShoot();
     }
 
@@ -86,6 +90,96 @@ public class Ak47 : MonoBehaviour
         {
             spriteRenderer.flipY = gunDirection.x < 0f;
         }
+    }
+
+    private void SyncSortingWithPlayer()
+    {
+        if (spriteRenderer == null)
+        {
+            return;
+        }
+
+        SpriteRenderer targetRenderer = ResolvePlayerBodyRenderer();
+        if (targetRenderer == null)
+        {
+            return;
+        }
+
+        spriteRenderer.sortingLayerID = targetRenderer.sortingLayerID;
+        spriteRenderer.sortingOrder = targetRenderer.sortingOrder;
+    }
+
+    private void UpdateOcclusionVisibility()
+    {
+        if (spriteRenderer == null)
+        {
+            return;
+        }
+
+        Vector2 visibilityPoint = playerTransform != null ? (Vector2)playerTransform.position : (Vector2)transform.position;
+        IReadOnlyList<StoneStatueEffect> statues = StoneStatueEffect.ActiveStatues;
+        bool isOccluded = false;
+        for (int index = 0; index < statues.Count; index++)
+        {
+            StoneStatueEffect statue = statues[index];
+            if (statue == null || !statue.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            if (!statue.ShouldOccludePoint(visibilityPoint, 0.08f))
+            {
+                continue;
+            }
+
+            isOccluded = true;
+            break;
+        }
+
+        if (spriteRenderer.enabled == isOccluded)
+        {
+            spriteRenderer.enabled = !isOccluded;
+        }
+    }
+
+    private SpriteRenderer ResolvePlayerBodyRenderer()
+    {
+        if (playerBodyRenderer != null && playerBodyRenderer.gameObject != gameObject)
+        {
+            return playerBodyRenderer;
+        }
+
+        if (playerTransform == null)
+        {
+            playerTransform = transform.parent;
+        }
+
+        if (playerTransform == null)
+        {
+            return null;
+        }
+
+        playerBodyRenderer = playerTransform.GetComponent<SpriteRenderer>();
+        if (playerBodyRenderer != null && playerBodyRenderer.gameObject != gameObject)
+        {
+            return playerBodyRenderer;
+        }
+
+        SpriteRenderer[] renderers = playerTransform.GetComponentsInChildren<SpriteRenderer>(true);
+        for (int index = 0; index < renderers.Length; index++)
+        {
+            SpriteRenderer renderer = renderers[index];
+            if (renderer == null || renderer.gameObject == gameObject)
+            {
+                continue;
+            }
+
+            playerBodyRenderer = renderer;
+            return playerBodyRenderer;
+        }
+
+        playerBodyRenderer = null;
+        return null;
     }
 
     private void RefreshCameraReference()

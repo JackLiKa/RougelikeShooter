@@ -244,6 +244,8 @@ namespace GameScene
             AppendBonus(builder, card.BonusPierce, "Pierce");
             AppendBonus(builder, card.BonusPickupRadius, "Pickup Radius");
             AppendBonus(builder, card.BonusHealOnPickup, "Heal on Pickup");
+            AppendBonus(builder, card.BonusAmmoCapacity, "Ammo");
+            AppendBonus(builder, card.BonusReloadSpeed * 100f, "Reload%");
             return builder.Length == 0 ? "No active effect" : builder.ToString();
         }
 

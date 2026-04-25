@@ -26,6 +26,17 @@ public sealed class SessionPickupState
     public bool GrantsFreeLevel;
 }
 
+public sealed class SessionChestState
+{
+    public string SceneKey;
+    public float PositionX;
+    public float PositionY;
+    public int MaxHits;
+    public int CurrentHits;
+    public bool IsBroken;
+    public bool IsRuntimeSpawned;
+}
+
 public sealed class SessionSnapshotData
 {
     public PlayerType PlayerType;
@@ -43,9 +54,20 @@ public sealed class SessionSnapshotData
     public float SkillCooldownRemaining;
     public int RewindUsesRemaining;
     public int PendingLevelUpChoices;
+    public int ChestBonusMaxHp;
+    public int ChestBonusAttack;
+    public float ChestBonusMoveSpeed;
+    public float ChestBonusShootSpeed;
+    public float ChestBonusBulletSpeed;
+    public float ChestEnemySlowPercent;
+    public int ChestBonusAmmoCapacity;
+    public float ChestBonusReloadSpeed;
+    public int NextChestHitRequirement;
+    public int NextDynamicChestId;
     public List<SessionCardState> Cards = new List<SessionCardState>();
     public List<SessionEnemyState> Enemies = new List<SessionEnemyState>();
     public List<SessionPickupState> Pickups = new List<SessionPickupState>();
+    public List<SessionChestState> Chests = new List<SessionChestState>();
 }
 
 public sealed class SavedSessionInfo
@@ -59,7 +81,7 @@ public sealed class SavedSessionInfo
 
 public static class SessionSaveRepository
 {
-    private const int FileVersion = 1;
+    private const int FileVersion = 3;
     private const string SessionFileName = "roguelike-session-save.bin";
     private const string SnapshotDirectoryName = "RoguelikeSnapshots";
     private const string ManualSaveDirectoryName = "RoguelikeSaves";
@@ -316,6 +338,30 @@ public static class SessionSaveRepository
                 writer.Write(pickup.ExperienceValue);
                 writer.Write(pickup.GrantsFreeLevel);
             }
+
+            writer.Write(snapshot.ChestBonusMaxHp);
+            writer.Write(snapshot.ChestBonusAttack);
+            writer.Write(snapshot.ChestBonusMoveSpeed);
+            writer.Write(snapshot.ChestBonusShootSpeed);
+            writer.Write(snapshot.ChestBonusBulletSpeed);
+            writer.Write(snapshot.ChestEnemySlowPercent);
+            writer.Write(snapshot.ChestBonusAmmoCapacity);
+            writer.Write(snapshot.ChestBonusReloadSpeed);
+            writer.Write(snapshot.NextChestHitRequirement);
+            writer.Write(snapshot.NextDynamicChestId);
+
+            writer.Write(snapshot.Chests.Count);
+            for (int index = 0; index < snapshot.Chests.Count; index++)
+            {
+                SessionChestState chest = snapshot.Chests[index];
+                writer.Write(chest.SceneKey ?? string.Empty);
+                writer.Write(chest.PositionX);
+                writer.Write(chest.PositionY);
+                writer.Write(chest.MaxHits);
+                writer.Write(chest.CurrentHits);
+                writer.Write(chest.IsBroken);
+                writer.Write(chest.IsRuntimeSpawned);
+            }
         }
     }
 
@@ -332,7 +378,8 @@ public static class SessionSaveRepository
             using (FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
             using (BinaryReader reader = new BinaryReader(stream))
             {
-                if (reader.ReadInt32() != FileVersion)
+                int version = reader.ReadInt32();
+                if (version != 1 && version != 2 && version != FileVersion)
                 {
                     return false;
                 }
@@ -389,6 +436,38 @@ public static class SessionSaveRepository
                         ExperienceValue = reader.ReadSingle(),
                         GrantsFreeLevel = reader.ReadBoolean()
                     });
+                }
+
+                if (version >= 2)
+                {
+                    snapshot.ChestBonusMaxHp = reader.ReadInt32();
+                    snapshot.ChestBonusAttack = reader.ReadInt32();
+                    snapshot.ChestBonusMoveSpeed = reader.ReadSingle();
+                    snapshot.ChestBonusShootSpeed = reader.ReadSingle();
+                    snapshot.ChestBonusBulletSpeed = reader.ReadSingle();
+                    snapshot.ChestEnemySlowPercent = reader.ReadSingle();
+                    if (version >= 3)
+                    {
+                        snapshot.ChestBonusAmmoCapacity = reader.ReadInt32();
+                        snapshot.ChestBonusReloadSpeed = reader.ReadSingle();
+                        snapshot.NextChestHitRequirement = reader.ReadInt32();
+                        snapshot.NextDynamicChestId = reader.ReadInt32();
+                    }
+
+                    int chestCount = reader.ReadInt32();
+                    for (int index = 0; index < chestCount; index++)
+                    {
+                        snapshot.Chests.Add(new SessionChestState
+                        {
+                            SceneKey = reader.ReadString(),
+                            PositionX = version >= 3 ? reader.ReadSingle() : 0f,
+                            PositionY = version >= 3 ? reader.ReadSingle() : 0f,
+                            MaxHits = version >= 3 ? reader.ReadInt32() : 100,
+                            CurrentHits = reader.ReadInt32(),
+                            IsBroken = reader.ReadBoolean(),
+                            IsRuntimeSpawned = version >= 3 && reader.ReadBoolean()
+                        });
+                    }
                 }
             }
         }

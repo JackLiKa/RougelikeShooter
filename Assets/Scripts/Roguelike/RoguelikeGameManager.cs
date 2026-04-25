@@ -17,7 +17,18 @@ public sealed class RoguelikeGameManager : MonoBehaviour
     private sealed class BulletHitInfo
     {
         public EnemyActor Enemy;
+        public BreakableChest Chest;
         public float HitT;
+    }
+
+    private enum ChestRewardType
+    {
+        BonusLevels,
+        CoreStatsBoost,
+        MoveSpeedBoost,
+        BulletSlow,
+        AmmoCapacityBoost,
+        ReloadSpeedBoost
     }
 
     private sealed class PendingBurstShot
@@ -51,6 +62,8 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         public int BonusPierce;
         public float BonusPickupRadius;
         public int BonusHealOnPickup;
+        public int BonusAmmoCapacity;
+        public float BonusReloadSpeed;
 
         public void Clear()
         {
@@ -65,6 +78,8 @@ public sealed class RoguelikeGameManager : MonoBehaviour
             BonusPierce = 0;
             BonusPickupRadius = 0f;
             BonusHealOnPickup = 0;
+            BonusAmmoCapacity = 0;
+            BonusReloadSpeed = 0f;
         }
     }
 
@@ -90,6 +105,7 @@ public sealed class RoguelikeGameManager : MonoBehaviour
     private ComponentPool<ExperiencePickup> pickupPool;
     private ComponentPool<FloatingDamageText> damageTextPool;
     private Transform poolRoot;
+    private Transform mapRoot;
     private Transform bulletTemplate;
     private Transform enemyTemplateRoot;
     private Transform activePlayer;
@@ -99,6 +115,7 @@ public sealed class RoguelikeGameManager : MonoBehaviour
     private MapGenerator mapGenerator;
     private CharacterAnimationBridge playerAnimation;
     private AdaptiveDifficultyMonitor adaptiveDifficulty;
+    private GameObject chestSpawnTemplate;
 
     private float elapsedTime;
     private float nextSnapshotTimer;
@@ -108,6 +125,7 @@ public sealed class RoguelikeGameManager : MonoBehaviour
     private float forcedPickupMagnetRemaining;
     private float forcedPickupSpeedMultiplier = 1f;
     private float playerTerrainDamageTimer;
+    private float playerStatueHealAccumulator;
     private float playerHitRadius = 1.05f;
     private float expToNextLevel;
     private float currentExp;
@@ -116,6 +134,8 @@ public sealed class RoguelikeGameManager : MonoBehaviour
     private int currentAmmo;
     private int rewindUsesRemaining;
     private int pendingLevelChoices;
+    private int nextChestHitRequirement = 100;
+    private int nextDynamicChestId = 1;
     private int earnedGold;
     private int earnedUserExp;
 
@@ -125,18 +145,30 @@ public sealed class RoguelikeGameManager : MonoBehaviour
     private bool showPauseMenu;
     private bool showSettlement;
     private bool showUpgradeChoices;
+    private bool showChestRewardOverlay;
     private bool showWaterEffectPrompt;
     private bool showRewindCountdown;
     private bool isRestoringSnapshot;
     private bool hasSettledRewards;
     private bool hasShownWaterEffectPrompt;
+    private bool isPlayerHealingFromStatue;
     private bool wasPlayerInWaterLastFrame;
     private bool isPlayerDeathSequenceRunning;
     private int rewindCountdownValue;
     private int skillBonusMaxHp;
     private int skillBonusAttack;
+    private int chestBonusMaxHp;
+    private int chestBonusAttack;
+    private int chestBonusAmmoCapacity;
     private float skillBonusMoveSpeed;
     private float skillBonusShootSpeed;
+    private float chestBonusMoveSpeed;
+    private float chestBonusShootSpeed;
+    private float chestBonusBulletSpeed;
+    private float chestEnemySlowPercent;
+    private float chestBonusReloadSpeed;
+    private string currentChestRewardTitle = string.Empty;
+    private string currentChestRewardDescription = string.Empty;
 
     private PlayerSkillController skillController;
 
@@ -153,6 +185,17 @@ public sealed class RoguelikeGameManager : MonoBehaviour
     private const float EnemyWaveContactRangeGain = 0.035f;
     private const float EnemyWaveScaleGain = 0.012f;
     private const int MaxAdditionalVolleyCount = 2;
+    private const float StoneStatueHealPercentPerSecond = 0.05f;
+    private const float ChestRewardAllStatsPercent = 0.3f;
+    private const float ChestRewardMoveSpeedPercent = 0.5f;
+    private const float ChestRewardEnemySlowPercent = 0.05f;
+    private const float ChestRewardSlowDurationSeconds = 2.5f;
+    private const float ChestRewardAmmoCapacityPercent = 0.35f;
+    private const float ChestRewardReloadSpeedPercent = 0.35f;
+    private const int DesiredChestCount = 10;
+    private const int BaseChestHitRequirement = 100;
+    private const float ChestSpawnMinDistanceFromPlayer = 4.5f;
+    private const int ChestSpawnPositionAttempts = 48;
 
     public PlayerRuntimeStats PlayerStats => playerStats;
     public float PlayerHitRadius => playerHitRadius;
@@ -164,7 +207,7 @@ public sealed class RoguelikeGameManager : MonoBehaviour
     public float ExpToNextLevel => Mathf.Max(1f, expToNextLevel);
     public float ExpRatio => Mathf.Clamp01(ExpToNextLevel <= 0f ? 0f : CurrentExp / ExpToNextLevel);
     public int CurrentAmmo => currentAmmo;
-    public int MaxAmmo => weaponProfile != null ? weaponProfile.MaxAmmo : 0;
+    public int MaxAmmo => weaponProfile != null ? Mathf.Max(1, weaponProfile.MaxAmmo + sessionBonuses.BonusAmmoCapacity + chestBonusAmmoCapacity) : 0;
     public int CurrentExtraPierce => Mathf.Max(0, (weaponProfile != null ? weaponProfile.Pierce : 0) + sessionBonuses.BonusPierce);
     public int CurrentVolleyCount => 1 + Mathf.Clamp(sessionBonuses.BonusProjectileCount + sessionBonuses.BonusVolleyCount, 0, MaxAdditionalVolleyCount);
     public int CurrentBurstCount => 1 + Mathf.Max(0, sessionBonuses.BonusBurstCount);
@@ -172,6 +215,9 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         ? Mathf.Max(0.1f, weaponProfile.ShootRate + (playerStats != null ? playerStats.ShootSpeed * 0.25f : 0f))
         : 1f;
     public float ReloadRemaining => reloadRemaining;
+    public float CurrentReloadDuration => weaponProfile != null
+        ? Mathf.Max(0.2f, weaponProfile.ReloadDuration / (1f + Mathf.Max(0f, sessionBonuses.BonusReloadSpeed + chestBonusReloadSpeed)))
+        : 0.2f;
     public bool IsReloading => reloadRemaining > 0f;
     public float SkillCooldownRemaining => activeSkillCooldownRemaining;
     public bool IsSkillOnInfiniteCooldown => float.IsPositiveInfinity(activeSkillCooldownRemaining);
@@ -182,14 +228,19 @@ public sealed class RoguelikeGameManager : MonoBehaviour
     public bool ShowPauseMenu => showPauseMenu;
     public bool ShowSettlement => showSettlement;
     public bool ShowUpgradeChoices => showUpgradeChoices;
+    public bool ShowChestRewardOverlay => showChestRewardOverlay;
     public bool ShowWaterEffectPrompt => showWaterEffectPrompt;
     public bool ShowRewindCountdown => showRewindCountdown;
     public int RewindCountdownValue => rewindCountdownValue;
+    public bool IsPlayerHealingFromStatue => isPlayerHealingFromStatue;
+    public string CurrentChestRewardTitle => currentChestRewardTitle;
+    public string CurrentChestRewardDescription => currentChestRewardDescription;
     public bool CanAcceptPlayerInput => initialized
         && !isPaused
         && !showPauseMenu
         && !showSettlement
         && !showUpgradeChoices
+        && !showChestRewardOverlay
         && !showWaterEffectPrompt
         && !showRewindCountdown
         && !isRestoringSnapshot
@@ -278,6 +329,16 @@ public sealed class RoguelikeGameManager : MonoBehaviour
             return;
         }
 
+        if (showChestRewardOverlay)
+        {
+            if (Input.GetKeyDown(KeyCode.B))
+            {
+                CloseChestRewardOverlay();
+            }
+
+            return;
+        }
+
         if (showSettlement || showRewindCountdown || isRestoringSnapshot || isPlayerDeathSequenceRunning)
         {
             return;
@@ -316,6 +377,11 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         UpdateWaveState();
         UpdateWaveSpawns(deltaTime);
         UpdatePlayerTerrainEffects(deltaTime);
+        if (!showChestRewardOverlay && GetActiveChestCount() < DesiredChestCount)
+        {
+            EnsureChestPopulation(true);
+        }
+
         if (showSettlement || showWaterEffectPrompt || isPaused)
         {
             return;
@@ -350,6 +416,7 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         inGameConfig = RoguelikeDataRepository.GetInGameConfig();
         mapConfig = RoguelikeDataRepository.GetMapConfig();
         saveConfig = RoguelikeDataRepository.GetSaveConfig();
+        mapRoot = GameObject.Find("map")?.transform;
 
         if (!ResolvePlayerContext())
         {
@@ -359,6 +426,8 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         EnsurePoolRoot();
         PrepareTemplates();
         PreparePools();
+        ObstacleMarker.ConfigureSceneObstacles();
+        PrepareChestSpawnTemplate();
         ResetForNewRun();
 
         if (SessionSaveRepository.HasPendingSaveSelection() || SessionSaveRepository.HasSavedSession())
@@ -371,7 +440,6 @@ public sealed class RoguelikeGameManager : MonoBehaviour
             QueueWave(currentWave);
         }
 
-        ObstacleMarker.ConfigureSceneObstacles();
         skillController = PlayerSkillController.EnsureExists(gameObject);
         skillController.Initialize(this, activePlayer, playerStats, GameSelectionConfig.CurrentPlayerType);
 
@@ -472,15 +540,29 @@ public sealed class RoguelikeGameManager : MonoBehaviour
     private void ResetForNewRun()
     {
         sessionBonuses.Clear();
+        chestBonusMaxHp = 0;
+        chestBonusAttack = 0;
+        chestBonusAmmoCapacity = 0;
+        chestBonusMoveSpeed = 0f;
+        chestBonusShootSpeed = 0f;
+        chestBonusBulletSpeed = 0f;
+        chestEnemySlowPercent = 0f;
+        chestBonusReloadSpeed = 0f;
+        nextChestHitRequirement = BaseChestHitRequirement;
+        nextDynamicChestId = 1;
+        playerStatueHealAccumulator = 0f;
+        isPlayerHealingFromStatue = false;
+        showChestRewardOverlay = false;
+        currentChestRewardTitle = string.Empty;
+        currentChestRewardDescription = string.Empty;
         PlayerProfile profile = RoguelikeDataRepository.GetPlayerProfile(GameSelectionConfig.CurrentPlayerType);
         playerStats.ApplyProfile(profile);
-        ApplyBonusesToPlayer();
 
         currentWave = 1;
         playerLevel = 1;
         currentExp = 0f;
         expToNextLevel = GetRequiredExpForNextLevel(playerLevel);
-        currentAmmo = weaponProfile.MaxAmmo;
+        currentAmmo = MaxAmmo;
         reloadRemaining = 0f;
         activeSkillCooldownRemaining = 0f;
         forcedPickupMagnetRemaining = 0f;
@@ -499,11 +581,13 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         showPauseMenu = false;
         showSettlement = false;
         showUpgradeChoices = false;
+        showChestRewardOverlay = false;
         showWaterEffectPrompt = false;
         showRewindCountdown = false;
         isRestoringSnapshot = false;
         isPlayerDeathSequenceRunning = false;
         hasShownWaterEffectPrompt = false;
+        isPlayerHealingFromStatue = false;
         wasPlayerInWaterLastFrame = false;
         rewindCountdownValue = 0;
         cardStacks.Clear();
@@ -513,11 +597,14 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         skillBonusAttack = 0;
         skillBonusMoveSpeed = 0f;
         skillBonusShootSpeed = 0f;
+        ApplyBonusesToPlayer();
         ReleaseAllBullets();
         ReleaseAllEnemies();
         ReleaseAllPickups();
         ReleaseAllDamageTexts();
         activeWaveSpawns.Clear();
+        ResetAllChests();
+        EnsureChestPopulation(false);
 
         activePlayer.position = GetInitialPlayerSpawnPosition();
         ResetPlayerAnimationState();
@@ -546,7 +633,7 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         int burstCount = CurrentBurstCount;
         float spread = Mathf.Max(8f, weaponProfile.SpreadAngle);
         int totalDamage = Mathf.Max(1, weaponProfile.Damage + playerStats.Attack + sessionBonuses.BonusAttack);
-        float bulletSpeed = weaponProfile.ProjectileSpeed + sessionBonuses.BonusBulletSpeed;
+        float bulletSpeed = weaponProfile.ProjectileSpeed + sessionBonuses.BonusBulletSpeed + chestBonusBulletSpeed;
         int totalPierce = Mathf.Max(0, weaponProfile.Pierce + sessionBonuses.BonusPierce);
         Vector2 fireDirection = direction.sqrMagnitude <= 0.001f ? Vector2.right : direction.normalized;
 
@@ -598,6 +685,11 @@ public sealed class RoguelikeGameManager : MonoBehaviour
 
     public bool ProcessBulletHit(Bullet bullet)
     {
+        if (showChestRewardOverlay)
+        {
+            return false;
+        }
+
         Vector2 segmentStart = bullet.PreviousPosition;
         Vector2 segmentEnd = bullet.Position;
         float hitDistance = bullet.HitRadius;
@@ -624,6 +716,27 @@ public sealed class RoguelikeGameManager : MonoBehaviour
             });
         }
 
+        IReadOnlyList<BreakableChest> chests = BreakableChest.ActiveChests;
+        for (int index = 0; index < chests.Count; index++)
+        {
+            BreakableChest chest = chests[index];
+            if (chest == null || chest.IsBroken || !chest.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            if (!chest.TryGetHit(segmentStart, segmentEnd, hitDistance, out float chestHitT))
+            {
+                continue;
+            }
+
+            hitInfos.Add(new BulletHitInfo
+            {
+                Chest = chest,
+                HitT = chestHitT
+            });
+        }
+
         if (hitInfos.Count == 0)
         {
             return true;
@@ -632,6 +745,17 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         hitInfos.Sort((left, right) => left.HitT.CompareTo(right.HitT));
         for (int index = 0; index < hitInfos.Count; index++)
         {
+            BreakableChest targetChest = hitInfos[index].Chest;
+            if (targetChest != null)
+            {
+                if (targetChest.ApplyBulletHit(out bool brokeThisFrame) && brokeThisFrame)
+                {
+                    HandleChestBroken(targetChest);
+                }
+
+                return false;
+            }
+
             EnemyActor targetEnemy = hitInfos[index].Enemy;
             if (targetEnemy == null || bullet.HasHitEnemy(targetEnemy))
             {
@@ -642,6 +766,11 @@ public sealed class RoguelikeGameManager : MonoBehaviour
             Vector3 hitPosition = Vector3.Lerp(segmentStart, segmentEnd, hitInfos[index].HitT);
             Vector3 textPosition = hitPosition + new Vector3(0f, Mathf.Max(1.2f, targetEnemy.HitRadius * 0.55f), 0f);
             targetEnemy.TakeDamage(bullet.Damage, false);
+            if (chestEnemySlowPercent > 0f)
+            {
+                targetEnemy.ApplySlow(chestEnemySlowPercent, ChestRewardSlowDurationSeconds);
+            }
+
             SpawnDamageText(textPosition, bullet.Damage, false);
 
             if (bullet.RemainingPierce <= 0)
@@ -697,13 +826,30 @@ public sealed class RoguelikeGameManager : MonoBehaviour
 
     public void TogglePauseMenu()
     {
-        if (!initialized || showSettlement || showUpgradeChoices || showRewindCountdown || isRestoringSnapshot)
+        if (!initialized || showSettlement || showUpgradeChoices || showChestRewardOverlay || showRewindCountdown || isRestoringSnapshot)
         {
             return;
         }
 
         showPauseMenu = !showPauseMenu;
         SetPaused(showPauseMenu);
+    }
+
+    public void CloseChestRewardOverlay()
+    {
+        if (!showChestRewardOverlay)
+        {
+            return;
+        }
+
+        showChestRewardOverlay = false;
+        currentChestRewardTitle = string.Empty;
+        currentChestRewardDescription = string.Empty;
+        OpenUpgradeChoicesIfNeeded();
+        if (!showUpgradeChoices && !showPauseMenu && !showSettlement && !showWaterEffectPrompt && !showRewindCountdown)
+        {
+            SetPaused(false);
+        }
     }
 
     public void ChooseUpgradeCard(int cardIndex)
@@ -810,6 +956,31 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         return renderer != null ? renderer.sortingOrder : 0;
     }
 
+    public int GetHighestPlayerSortingOrder()
+    {
+        if (activePlayer == null)
+        {
+            return 0;
+        }
+
+        SpriteRenderer[] renderers = activePlayer.GetComponentsInChildren<SpriteRenderer>(true);
+        int highestOrder = 0;
+        bool hasRenderer = false;
+        for (int index = 0; index < renderers.Length; index++)
+        {
+            SpriteRenderer renderer = renderers[index];
+            if (renderer == null)
+            {
+                continue;
+            }
+
+            highestOrder = hasRenderer ? Mathf.Max(highestOrder, renderer.sortingOrder) : renderer.sortingOrder;
+            hasRenderer = true;
+        }
+
+        return hasRenderer ? highestOrder : 0;
+    }
+
     public EnemyActor GetNearestEnemy(Vector2 origin, float maxDistance = float.MaxValue)
     {
         EnemyActor nearestEnemy = null;
@@ -897,7 +1068,17 @@ public sealed class RoguelikeGameManager : MonoBehaviour
             ReloadRemaining = reloadRemaining,
             SkillCooldownRemaining = activeSkillCooldownRemaining,
             RewindUsesRemaining = rewindUsesRemaining,
-            PendingLevelUpChoices = pendingLevelChoices
+            PendingLevelUpChoices = pendingLevelChoices,
+            ChestBonusMaxHp = chestBonusMaxHp,
+            ChestBonusAttack = chestBonusAttack,
+            ChestBonusMoveSpeed = chestBonusMoveSpeed,
+            ChestBonusShootSpeed = chestBonusShootSpeed,
+            ChestBonusBulletSpeed = chestBonusBulletSpeed,
+            ChestEnemySlowPercent = chestEnemySlowPercent,
+            ChestBonusAmmoCapacity = chestBonusAmmoCapacity,
+            ChestBonusReloadSpeed = chestBonusReloadSpeed,
+            NextChestHitRequirement = nextChestHitRequirement,
+            NextDynamicChestId = nextDynamicChestId
         };
 
         foreach (KeyValuePair<string, int> pair in cardStacks)
@@ -931,6 +1112,27 @@ public sealed class RoguelikeGameManager : MonoBehaviour
                 PositionY = pickup.Position.y,
                 ExperienceValue = pickup.ExperienceValue,
                 GrantsFreeLevel = pickup.GrantsFreeLevel
+            });
+        }
+
+        IReadOnlyList<BreakableChest> chests = BreakableChest.ActiveChests;
+        for (int index = 0; index < chests.Count; index++)
+        {
+            BreakableChest chest = chests[index];
+            if (chest == null)
+            {
+                continue;
+            }
+
+            snapshot.Chests.Add(new SessionChestState
+            {
+                SceneKey = chest.SceneKey,
+                PositionX = chest.Position.x,
+                PositionY = chest.Position.y,
+                MaxHits = chest.MaxHits,
+                CurrentHits = chest.CurrentHits,
+                IsBroken = chest.IsBroken,
+                IsRuntimeSpawned = chest.IsRuntimeSpawned
             });
         }
 
@@ -975,6 +1177,7 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         isRestoringSnapshot = true;
         showPauseMenu = false;
         showUpgradeChoices = false;
+        showChestRewardOverlay = false;
         showSettlement = false;
         showRewindCountdown = false;
         rewindCountdownValue = 0;
@@ -989,20 +1192,25 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         ReleaseAllPickups();
         yield return null;
 
+        DestroyRuntimeSpawnedChests();
+        yield return null;
+
         GameSelectionConfig.CurrentPlayerType = snapshot.PlayerType;
         GameSelectionConfig.CurrentWeaponType = snapshot.WeaponType;
         GameSceneSelectionApplier.Apply(snapshot.PlayerType, snapshot.WeaponType);
         ResolvePlayerContext();
+        ObstacleMarker.ConfigureSceneObstacles();
 
         weaponProfile = RoguelikeDataRepository.GetWeaponProfile(snapshot.WeaponType);
         currentWave = Mathf.Max(1, snapshot.CurrentWave);
         playerLevel = Mathf.Max(1, snapshot.PlayerLevel);
         currentExp = Mathf.Max(0f, snapshot.CurrentExp);
         expToNextLevel = Mathf.Max(1f, snapshot.ExpToNextLevel);
-        currentAmmo = Mathf.Clamp(snapshot.CurrentAmmo, 0, weaponProfile.MaxAmmo);
+        currentAmmo = Mathf.Clamp(snapshot.CurrentAmmo, 0, MaxAmmo);
         reloadRemaining = Mathf.Max(0f, snapshot.ReloadRemaining);
         activeSkillCooldownRemaining = Mathf.Max(0f, snapshot.SkillCooldownRemaining);
         playerTerrainDamageTimer = 0f;
+        playerStatueHealAccumulator = 0f;
         rewindUsesRemaining = Mathf.Max(0, snapshot.RewindUsesRemaining);
         if (forcedRewindUsesRemaining >= 0)
         {
@@ -1014,6 +1222,20 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         nextAutoSaveTimer = 0f;
         earnedGold = currentWave * inGameConfig.RewardGoldPerWave;
         earnedUserExp = currentWave * inGameConfig.RewardExpPerWave;
+        chestBonusMaxHp = snapshot.ChestBonusMaxHp;
+        chestBonusAttack = snapshot.ChestBonusAttack;
+        chestBonusMoveSpeed = snapshot.ChestBonusMoveSpeed;
+        chestBonusShootSpeed = snapshot.ChestBonusShootSpeed;
+        chestBonusBulletSpeed = snapshot.ChestBonusBulletSpeed;
+        chestEnemySlowPercent = snapshot.ChestEnemySlowPercent;
+        chestBonusAmmoCapacity = snapshot.ChestBonusAmmoCapacity;
+        chestBonusReloadSpeed = snapshot.ChestBonusReloadSpeed;
+        nextChestHitRequirement = Mathf.Max(BaseChestHitRequirement, snapshot.NextChestHitRequirement);
+        nextDynamicChestId = Mathf.Max(1, snapshot.NextDynamicChestId);
+        showChestRewardOverlay = false;
+        currentChestRewardTitle = string.Empty;
+        currentChestRewardDescription = string.Empty;
+        isPlayerHealingFromStatue = false;
         cardStacks.Clear();
         for (int index = 0; index < snapshot.Cards.Count; index++)
         {
@@ -1021,7 +1243,11 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         }
 
         RecalculateCardBonuses();
+        ResetAllChests();
+        RestoreChestStates(snapshot);
+        EnsureChestPopulation(false);
         activePlayer.position = ClampToPlayableMapBounds(new Vector3(snapshot.PlayerPositionX, snapshot.PlayerPositionY, 0f), playerHitRadius);
+        currentAmmo = Mathf.Clamp(currentAmmo, 0, MaxAmmo);
         playerStats.SetCurrentHp(snapshot.PlayerHp);
         isPlayerDeathSequenceRunning = false;
         ResetPlayerAnimationState();
@@ -1078,6 +1304,7 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         wasPlayerInWaterLastFrame = isInWater;
         float moveModifier = GetTerrainMoveSpeedModifier(activePlayer.position);
         playerStats.SetEnvironmentMoveSpeedModifier(moveModifier);
+        UpdateStoneStatueHealing(deltaTime);
 
         float damagePerSecond = terrainType == TerrainSurfaceType.Water ? 1f : 0f;
         if (damagePerSecond <= 0f)
@@ -1094,6 +1321,50 @@ public sealed class RoguelikeGameManager : MonoBehaviour
             if (showSettlement)
             {
                 break;
+            }
+        }
+    }
+
+    private void UpdateStoneStatueHealing(float deltaTime)
+    {
+        isPlayerHealingFromStatue = false;
+        if (playerStats == null || activePlayer == null)
+        {
+            playerStatueHealAccumulator = 0f;
+            return;
+        }
+
+        IReadOnlyList<StoneStatueEffect> statues = StoneStatueEffect.ActiveStatues;
+        for (int index = 0; index < statues.Count; index++)
+        {
+            StoneStatueEffect statue = statues[index];
+            if (statue == null || !statue.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            if (!statue.ContainsPlayer(activePlayer.position, playerHitRadius))
+            {
+                continue;
+            }
+
+            isPlayerHealingFromStatue = true;
+            break;
+        }
+
+        if (!isPlayerHealingFromStatue)
+        {
+            playerStatueHealAccumulator = 0f;
+            return;
+        }
+
+        playerStatueHealAccumulator += deltaTime * Mathf.Max(1f, playerStats.MaxHp * StoneStatueHealPercentPerSecond);
+        while (playerStatueHealAccumulator >= 1f)
+        {
+            playerStatueHealAccumulator -= 1f;
+            if (playerStats.CurrentHp < playerStats.MaxHp)
+            {
+                playerStats.ModifyCurrentHp(1);
             }
         }
     }
@@ -1315,7 +1586,7 @@ public sealed class RoguelikeGameManager : MonoBehaviour
 
     private void OpenUpgradeChoicesIfNeeded()
     {
-        if (pendingLevelChoices <= 0 || showUpgradeChoices || showSettlement)
+        if (pendingLevelChoices <= 0 || showUpgradeChoices || showSettlement || showChestRewardOverlay)
         {
             return;
         }
@@ -1364,6 +1635,7 @@ public sealed class RoguelikeGameManager : MonoBehaviour
 
     private void RecalculateCardBonuses()
     {
+        int previousMaxAmmo = MaxAmmo;
         sessionBonuses.Clear();
         ownedPowerCards.Clear();
         List<PowerCardData> cards = RoguelikeDataRepository.GetPowerCards();
@@ -1396,11 +1668,14 @@ public sealed class RoguelikeGameManager : MonoBehaviour
             sessionBonuses.BonusPierce += card.BonusPierce * pair.Value;
             sessionBonuses.BonusPickupRadius += card.BonusPickupRadius * pair.Value;
             sessionBonuses.BonusHealOnPickup += card.BonusHealOnPickup * pair.Value;
+            sessionBonuses.BonusAmmoCapacity += card.BonusAmmoCapacity * pair.Value;
+            sessionBonuses.BonusReloadSpeed += card.BonusReloadSpeed * pair.Value;
         }
 
         ownedPowerCards.Sort((left, right) => string.CompareOrdinal(left.Card?.Title, right.Card?.Title));
 
         ApplyBonusesToPlayer();
+        SyncWeaponBonusState(previousMaxAmmo);
     }
 
     private bool IsPowerCardAtGlobalCap(PowerCardData card)
@@ -1427,10 +1702,369 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         }
 
         playerStats.ApplySessionBonuses(
-            sessionBonuses.BonusHp + skillBonusMaxHp,
-            sessionBonuses.BonusAttack + skillBonusAttack,
-            sessionBonuses.BonusMoveSpeed + skillBonusMoveSpeed,
-            sessionBonuses.BonusShootRate + skillBonusShootSpeed);
+            sessionBonuses.BonusHp + skillBonusMaxHp + chestBonusMaxHp,
+            sessionBonuses.BonusAttack + skillBonusAttack + chestBonusAttack,
+            sessionBonuses.BonusMoveSpeed + skillBonusMoveSpeed + chestBonusMoveSpeed,
+            sessionBonuses.BonusShootRate + skillBonusShootSpeed + chestBonusShootSpeed);
+    }
+
+    private void ResetAllChests()
+    {
+        DestroyRuntimeSpawnedChests();
+        IReadOnlyList<BreakableChest> chests = BreakableChest.ActiveChests;
+        for (int index = 0; index < chests.Count; index++)
+        {
+            if (chests[index] != null)
+            {
+                chests[index].ResetRuntimeState();
+            }
+        }
+    }
+
+    private void RestoreChestStates(SessionSnapshotData snapshot)
+    {
+        if (snapshot == null)
+        {
+            return;
+        }
+
+        Dictionary<string, SessionChestState> lookup = new Dictionary<string, SessionChestState>(System.StringComparer.Ordinal);
+        for (int index = 0; index < snapshot.Chests.Count; index++)
+        {
+            SessionChestState state = snapshot.Chests[index];
+            if (state == null || string.IsNullOrWhiteSpace(state.SceneKey))
+            {
+                continue;
+            }
+
+            lookup[state.SceneKey] = state;
+        }
+
+        IReadOnlyList<BreakableChest> chests = BreakableChest.ActiveChests;
+        for (int index = 0; index < chests.Count; index++)
+        {
+            BreakableChest chest = chests[index];
+            if (chest == null)
+            {
+                continue;
+            }
+
+            if (lookup.TryGetValue(chest.SceneKey, out SessionChestState state))
+            {
+                chest.SetMaxHits(state.MaxHits);
+                chest.RestoreRuntimeState(state.CurrentHits, state.IsBroken);
+                lookup.Remove(chest.SceneKey);
+                continue;
+            }
+
+            chest.ResetRuntimeState();
+        }
+
+        foreach (SessionChestState state in lookup.Values)
+        {
+            SpawnDynamicChest(
+                state.MaxHits,
+                new Vector3(state.PositionX, state.PositionY, 0f),
+                state.SceneKey,
+                state.CurrentHits,
+                state.IsBroken);
+        }
+    }
+
+    private void HandleChestBroken(BreakableChest chest)
+    {
+        ChestRewardType reward = RollChestReward();
+        ApplyChestReward(reward, out string title, out string description);
+        EnsureChestPopulation(true);
+        showPauseMenu = false;
+        showUpgradeChoices = false;
+        showChestRewardOverlay = true;
+        currentChestRewardTitle = title;
+        currentChestRewardDescription = description;
+        SetPaused(true);
+    }
+
+    private ChestRewardType RollChestReward()
+    {
+        int rewardCount = System.Enum.GetValues(typeof(ChestRewardType)).Length;
+        return (ChestRewardType)Random.Range(0, rewardCount);
+    }
+
+    private void ApplyChestReward(ChestRewardType rewardType, out string title, out string description)
+    {
+        title = string.Empty;
+        description = string.Empty;
+
+        switch (rewardType)
+        {
+            case ChestRewardType.BonusLevels:
+                GrantImmediateLevels(3);
+                title = "\u5b9d\u7bb1\u5f3a\u5316\uff1a\u8fde\u5347\u4e09\u7ea7";
+                description = "\u7acb\u5373\u83b7\u5f97 3 \u7ea7\u3002\u5173\u95ed\u672c\u7a97\u53e3\u540e\uff0c\u4f1a\u81ea\u52a8\u8fdb\u5165\u5347\u7ea7\u9009\u62e9\u3002";
+                return;
+            case ChestRewardType.CoreStatsBoost:
+                chestBonusMaxHp += Mathf.Max(1, Mathf.CeilToInt(playerStats.BaseMaxHp * ChestRewardAllStatsPercent));
+                chestBonusAttack += Mathf.Max(1, Mathf.CeilToInt(playerStats.BaseAttack * ChestRewardAllStatsPercent));
+                chestBonusShootSpeed += Mathf.Max(0.1f, playerStats.BaseShootSpeed * ChestRewardAllStatsPercent);
+                chestBonusBulletSpeed += weaponProfile != null ? Mathf.Max(0.1f, weaponProfile.ProjectileSpeed * ChestRewardAllStatsPercent) : 0f;
+                ApplyBonusesToPlayer();
+                title = "\u5b9d\u7bb1\u5f3a\u5316\uff1a\u5168\u5c5e\u6027\u589e\u5e45";
+                description = "\u6700\u5927\u751f\u547d\uff0c\u653b\u51fb\uff0c\u5c04\u901f\u548c\u5b50\u5f39\u901f\u5ea6\u63d0\u9ad8 30%\uff0c\u79fb\u52a8\u901f\u5ea6\u4e0d\u53d8\u3002";
+                return;
+            case ChestRewardType.MoveSpeedBoost:
+                chestBonusMoveSpeed += Mathf.Max(0.1f, playerStats.BaseMoveSpeed * ChestRewardMoveSpeedPercent);
+                ApplyBonusesToPlayer();
+                title = "\u5b9d\u7bb1\u5f3a\u5316\uff1a\u8f7b\u7075\u6b65\u4f10";
+                description = "\u79fb\u52a8\u901f\u5ea6\u63d0\u9ad8 50%\uff0c\u66f4\u5bb9\u6613\u62c9\u5f00\u8ddd\u79bb\u4e0e\u8d70\u4f4d\u3002";
+                return;
+            case ChestRewardType.BulletSlow:
+                chestEnemySlowPercent = Mathf.Max(chestEnemySlowPercent, ChestRewardEnemySlowPercent);
+                title = "\u5b9d\u7bb1\u5f3a\u5316\uff1a\u5bd2\u971c\u5f39\u5934";
+                description = "\u5b50\u5f39\u547d\u4e2d\u602a\u7269\u65f6\u9644\u52a0 5% \u51cf\u901f\uff0c\u53ef\u53e0\u52a0\u5e76\u5237\u65b0\u6301\u7eed\u65f6\u95f4\u3002";
+                return;
+            case ChestRewardType.AmmoCapacityBoost:
+                {
+                    int previousMaxAmmo = MaxAmmo;
+                    chestBonusAmmoCapacity += weaponProfile != null ? Mathf.Max(1, Mathf.CeilToInt(weaponProfile.MaxAmmo * ChestRewardAmmoCapacityPercent)) : 6;
+                    SyncWeaponBonusState(previousMaxAmmo);
+                    title = "\u5b9d\u7bb1\u5f3a\u5316\uff1a\u5f39\u530f\u6269\u5bb9";
+                    description = "\u5f39\u530f\u5bb9\u91cf\u63d0\u9ad8\uff0c\u6bcf\u68ad\u80fd\u6253\u51fa\u66f4\u591a\u5b50\u5f39\u3002";
+                    return;
+                }
+            case ChestRewardType.ReloadSpeedBoost:
+                {
+                    int previousMaxAmmo = MaxAmmo;
+                    chestBonusReloadSpeed += ChestRewardReloadSpeedPercent;
+                    SyncWeaponBonusState(previousMaxAmmo);
+                    title = "\u5b9d\u7bb1\u5f3a\u5316\uff1a\u6218\u672f\u6362\u5f39";
+                    description = "\u6362\u5f39\u901f\u5ea6\u63d0\u9ad8 35%\uff0c\u7a7a\u5f39\u540e\u80fd\u66f4\u5feb\u6062\u590d\u706b\u529b\u3002";
+                    return;
+                }
+            default:
+                chestEnemySlowPercent = Mathf.Max(chestEnemySlowPercent, ChestRewardEnemySlowPercent);
+                title = "\u5b9d\u7bb1\u5f3a\u5316";
+                description = "\u5df2\u83b7\u5f97\u65b0\u7684\u6218\u6597\u589e\u76ca\u3002";
+                return;
+        }
+    }
+
+    private void GrantImmediateLevels(int levelCount)
+    {
+        int safeCount = Mathf.Max(0, levelCount);
+        for (int index = 0; index < safeCount; index++)
+        {
+            playerLevel++;
+            pendingLevelChoices++;
+        }
+
+        expToNextLevel = GetRequiredExpForNextLevel(playerLevel);
+        currentExp = Mathf.Clamp(currentExp, 0f, Mathf.Max(0f, expToNextLevel - 0.01f));
+        adaptiveDifficulty?.CaptureCurrentState(playerLevel, CurrentFireRate, GetCurrentAttackPower());
+    }
+
+    private void SyncWeaponBonusState(int previousMaxAmmo)
+    {
+        int newMaxAmmo = MaxAmmo;
+        if (newMaxAmmo <= 0)
+        {
+            currentAmmo = 0;
+            return;
+        }
+
+        if (previousMaxAmmo > 0 && newMaxAmmo > previousMaxAmmo)
+        {
+            currentAmmo = Mathf.Clamp(currentAmmo + (newMaxAmmo - previousMaxAmmo), 0, newMaxAmmo);
+        }
+        else
+        {
+            currentAmmo = Mathf.Clamp(currentAmmo, 0, newMaxAmmo);
+        }
+
+        if (reloadRemaining > 0f)
+        {
+            reloadRemaining = Mathf.Min(reloadRemaining, CurrentReloadDuration);
+        }
+    }
+
+    private int GetActiveChestCount()
+    {
+        int activeCount = 0;
+        IReadOnlyList<BreakableChest> chests = BreakableChest.ActiveChests;
+        for (int index = 0; index < chests.Count; index++)
+        {
+            BreakableChest chest = chests[index];
+            if (chest == null || chest.IsBroken || !chest.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            activeCount++;
+        }
+
+        return activeCount;
+    }
+
+    private void EnsureChestPopulation(bool incrementHitRequirement)
+    {
+        int missingCount = Mathf.Max(0, DesiredChestCount - GetActiveChestCount());
+        for (int index = 0; index < missingCount; index++)
+        {
+            int requiredHits = incrementHitRequirement
+                ? ++nextChestHitRequirement
+                : nextChestHitRequirement;
+            SpawnDynamicChest(requiredHits, null, null, 0, false);
+        }
+    }
+
+    private void PrepareChestSpawnTemplate()
+    {
+        if (chestSpawnTemplate != null || mapRoot == null)
+        {
+            return;
+        }
+
+        Transform source = null;
+        for (int index = 0; index < mapRoot.childCount; index++)
+        {
+            Transform child = mapRoot.GetChild(index);
+            if (string.Equals(child.name, "box", System.StringComparison.OrdinalIgnoreCase))
+            {
+                source = child;
+                break;
+            }
+        }
+
+        if (source == null)
+        {
+            return;
+        }
+
+        chestSpawnTemplate = Instantiate(source.gameObject, poolRoot != null ? poolRoot : transform);
+        chestSpawnTemplate.name = "RuntimeChestTemplate";
+        chestSpawnTemplate.SetActive(false);
+        SpriteRenderer[] renderers = chestSpawnTemplate.GetComponentsInChildren<SpriteRenderer>(true);
+        for (int index = 0; index < renderers.Length; index++)
+        {
+            if (renderers[index] != null)
+            {
+                renderers[index].enabled = true;
+            }
+        }
+    }
+
+    private BreakableChest SpawnDynamicChest(int maxHits, Vector3? desiredPosition, string sceneKey, int currentHits, bool isBroken)
+    {
+        PrepareChestSpawnTemplate();
+        if (chestSpawnTemplate == null || mapRoot == null)
+        {
+            return null;
+        }
+
+        Vector3 spawnPosition;
+        if (desiredPosition.HasValue)
+        {
+            spawnPosition = ClampToPlayableMapBounds(desiredPosition.Value, 0.8f);
+        }
+        else if (!TryFindChestSpawnPosition(out spawnPosition))
+        {
+            return null;
+        }
+
+        GameObject instance = Instantiate(chestSpawnTemplate, mapRoot);
+        instance.name = "box";
+        instance.transform.position = spawnPosition;
+        instance.SetActive(true);
+        ObstacleMarker.ConfigureSceneObstacles();
+
+        BreakableChest chest = BreakableChest.EnsureConfigured(instance);
+        if (chest == null)
+        {
+            Destroy(instance);
+            return null;
+        }
+
+        chest.SetRuntimeSpawned(true);
+        chest.SetSceneKey(string.IsNullOrWhiteSpace(sceneKey) ? $"dynamic/{nextDynamicChestId++}" : sceneKey);
+        chest.SetMaxHits(maxHits);
+        chest.RestoreRuntimeState(currentHits, isBroken);
+        return chest;
+    }
+
+    private bool TryFindChestSpawnPosition(out Vector3 spawnPosition)
+    {
+        spawnPosition = Vector3.zero;
+        if (chestSpawnTemplate == null || mapRoot == null || !TryGetPlayableMapBounds(out float minX, out float maxX, out float minY, out float maxY))
+        {
+            return false;
+        }
+
+        BreakableChest templateChest = chestSpawnTemplate.GetComponent<BreakableChest>();
+        Vector2 colliderSize = templateChest != null ? templateChest.ColliderSize : new Vector2(1f, 0.8f);
+        Vector2 colliderOffset = templateChest != null ? templateChest.ColliderOffset : Vector2.zero;
+
+        for (int attempt = 0; attempt < ChestSpawnPositionAttempts; attempt++)
+        {
+            Vector3 candidate = new Vector3(
+                Random.Range(minX + 1.5f, maxX - 1.5f),
+                Random.Range(minY + 1.5f, maxY - 1.5f),
+                0f);
+
+            TerrainSurfaceType terrainType = GetTerrainType(candidate);
+            if (terrainType == TerrainSurfaceType.Water)
+            {
+                continue;
+            }
+
+            if (Vector2.Distance(candidate, PlayerPosition) < ChestSpawnMinDistanceFromPlayer)
+            {
+                continue;
+            }
+
+            Vector2 overlapCenter = (Vector2)candidate + colliderOffset;
+            Collider2D[] hits = Physics2D.OverlapBoxAll(overlapCenter, colliderSize * 0.96f, 0f);
+            bool blocked = false;
+            for (int index = 0; index < hits.Length; index++)
+            {
+                Collider2D hit = hits[index];
+                if (hit == null || hit.isTrigger)
+                {
+                    continue;
+                }
+
+                if (!ObstacleMarker.IsObstacle(hit))
+                {
+                    continue;
+                }
+
+                blocked = true;
+                break;
+            }
+
+            if (blocked)
+            {
+                continue;
+            }
+
+            spawnPosition = candidate;
+            return true;
+        }
+
+        return false;
+    }
+
+    private void DestroyRuntimeSpawnedChests()
+    {
+        IReadOnlyList<BreakableChest> chests = BreakableChest.ActiveChests;
+        for (int index = chests.Count - 1; index >= 0; index--)
+        {
+            BreakableChest chest = chests[index];
+            if (chest == null || !chest.IsRuntimeSpawned)
+            {
+                continue;
+            }
+
+            Destroy(chest.gameObject);
+        }
     }
 
     private void InitializeAdaptiveDifficulty()
@@ -1681,7 +2315,7 @@ public sealed class RoguelikeGameManager : MonoBehaviour
 
     private void BeginReload()
     {
-        reloadRemaining = Mathf.Max(0.2f, weaponProfile.ReloadDuration);
+        reloadRemaining = CurrentReloadDuration;
     }
 
     private void UpdateReload(float deltaTime)
@@ -1694,7 +2328,7 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         reloadRemaining = Mathf.Max(0f, reloadRemaining - deltaTime);
         if (reloadRemaining <= 0f)
         {
-            currentAmmo = weaponProfile.MaxAmmo;
+            currentAmmo = MaxAmmo;
         }
     }
 
@@ -1709,6 +2343,7 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         SetPaused(true);
         showPauseMenu = false;
         showUpgradeChoices = false;
+        showChestRewardOverlay = false;
         showSettlement = true;
         if (!hasSettledRewards)
         {

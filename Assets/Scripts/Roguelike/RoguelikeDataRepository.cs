@@ -65,6 +65,8 @@ public sealed class PowerCardData
     public int BonusPierce;
     public float BonusPickupRadius;
     public int BonusHealOnPickup;
+    public int BonusAmmoCapacity;
+    public float BonusReloadSpeed;
 }
 
 [Serializable]
@@ -727,7 +729,9 @@ public static class RoguelikeDataRepository
                 BonusBurstCount = GetInt(row, "BonusBurstCount", 0),
                 BonusPierce = GetInt(row, "BonusPierce", 0),
                 BonusPickupRadius = GetFloat(row, "BonusPickupRadius", 0f),
-                BonusHealOnPickup = GetInt(row, "BonusHealOnPickup", 0)
+                BonusHealOnPickup = GetInt(row, "BonusHealOnPickup", 0),
+                BonusAmmoCapacity = GetInt(row, "BonusAmmoCapacity", 0),
+                BonusReloadSpeed = GetFloat(row, "BonusReloadSpeed", 0f)
             });
         }
 
@@ -761,6 +765,50 @@ public static class RoguelikeDataRepository
                 BonusShootRate = 0.6f
             });
         }
+
+        EnsureBuiltinCard(
+            "ammo_mag",
+            "\u6269\u5bb9\u5f39\u5305",
+            "\u5f39\u5323\u5bb9\u91cf +8",
+            8,
+            4,
+            card =>
+            {
+                card.BonusAmmoCapacity = 8;
+            });
+
+        EnsureBuiltinCard(
+            "fast_reload",
+            "\u5feb\u901f\u6362\u5f39",
+            "\u6362\u5f39\u901f\u5ea6 +20%",
+            8,
+            4,
+            card =>
+            {
+                card.BonusReloadSpeed = 0.2f;
+            });
+    }
+
+    private static void EnsureBuiltinCard(string cardKey, string title, string description, int weight, int maxStacks, Action<PowerCardData> configure)
+    {
+        for (int index = 0; index < cachedPowerCards.Count; index++)
+        {
+            if (string.Equals(cachedPowerCards[index].CardKey, cardKey, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+        }
+
+        PowerCardData card = new PowerCardData
+        {
+            CardKey = cardKey,
+            Title = title,
+            Description = description,
+            Weight = Mathf.Max(1, weight),
+            MaxStacks = Mathf.Max(1, maxStacks)
+        };
+        configure?.Invoke(card);
+        cachedPowerCards.Add(card);
     }
 
     private static List<Dictionary<string, string>> ReadCsvRows(string fileName)

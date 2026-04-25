@@ -3,6 +3,14 @@ using UnityEngine;
 
 public sealed class ObstacleMarker : MonoBehaviour
 {
+    private enum ObstacleKind
+    {
+        None,
+        Generic,
+        StoneStatue,
+        BreakableChest
+    }
+
     private const float ColliderWidthFactor = 0.72f;
     private const float ColliderHeightFactor = 0.34f;
     private const float ColliderYOffsetFactor = -0.28f;
@@ -17,7 +25,8 @@ public sealed class ObstacleMarker : MonoBehaviour
 
         foreach (Transform child in mapRoot)
         {
-            if (!IsObstacleCandidate(child.name))
+            ObstacleKind obstacleKind = ResolveObstacleKind(child.name);
+            if (obstacleKind == ObstacleKind.None)
             {
                 continue;
             }
@@ -29,6 +38,17 @@ public sealed class ObstacleMarker : MonoBehaviour
             }
 
             marker.EnsureCollider();
+
+            if (obstacleKind == ObstacleKind.StoneStatue)
+            {
+                StoneStatueEffect.EnsureConfigured(child.gameObject);
+                continue;
+            }
+
+            if (obstacleKind == ObstacleKind.BreakableChest)
+            {
+                BreakableChest.EnsureConfigured(child.gameObject);
+            }
         }
     }
 
@@ -37,15 +57,26 @@ public sealed class ObstacleMarker : MonoBehaviour
         return collider != null && collider.GetComponentInParent<ObstacleMarker>() != null;
     }
 
-    private static bool IsObstacleCandidate(string objectName)
+    private static ObstacleKind ResolveObstacleKind(string objectName)
     {
         if (string.IsNullOrWhiteSpace(objectName))
         {
-            return false;
+            return ObstacleKind.None;
+        }
+
+        if (string.Equals(objectName, "stoneStatue", StringComparison.OrdinalIgnoreCase))
+        {
+            return ObstacleKind.StoneStatue;
+        }
+
+        if (string.Equals(objectName, "box", StringComparison.OrdinalIgnoreCase))
+        {
+            return ObstacleKind.BreakableChest;
         }
 
         return objectName.IndexOf("cap", StringComparison.OrdinalIgnoreCase) >= 0
-            || string.Equals(objectName, "stoneStatue", StringComparison.OrdinalIgnoreCase);
+            ? ObstacleKind.Generic
+            : ObstacleKind.None;
     }
 
     private void EnsureCollider()

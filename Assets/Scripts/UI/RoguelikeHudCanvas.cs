@@ -20,6 +20,15 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
         public float DisplayFill;
     }
 
+    private sealed class ChestProgressBar
+    {
+        public RectTransform Root;
+        public RectTransform BackgroundRect;
+        public RectTransform FillRect;
+        public Text ValueText;
+        public float DisplayFill;
+    }
+
     private const int MaxCardSlots = 3;
     private const float BarSmoothSpeed = 10f;
     private const float BarSnapThreshold = 0.001f;
@@ -31,12 +40,16 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
     private static readonly Color OverlayTint = new Color(0.02f, 0.03f, 0.05f, 0.84f);
     private static readonly Color HpBarColor = new Color(0.91f, 0.28f, 0.34f, 1f);
     private static readonly Color ExpBarColor = new Color(0.3f, 0.83f, 0.48f, 1f);
+    private static readonly Color HealStatusColor = new Color(0.28f, 0.92f, 0.55f, 1f);
+    private static readonly Color ChestBarColor = new Color(0.94f, 0.66f, 0.22f, 1f);
     private static readonly Color BarBackground = new Color(0.15f, 0.2f, 0.25f, 1f);
     private static readonly Color MinimapBackground = new Color(0.04f, 0.06f, 0.09f, 0.98f);
     private static readonly Color MinimapGridColor = new Color(0.27f, 0.36f, 0.46f, 0.78f);
     private static readonly Color PlayerDotColor = new Color(0.22f, 0.9f, 0.42f, 1f);
     private static readonly Color EnemyDotColor = new Color(0.94f, 0.28f, 0.28f, 1f);
     private static readonly Color EliteEnemyDotColor = new Color(0.72f, 0.34f, 0.94f, 1f);
+    private static readonly Color StatueDotColor = new Color(0.62f, 0.66f, 0.72f, 1f);
+    private static readonly Color ChestDotColor = new Color(0.97f, 0.86f, 0.24f, 1f);
     private static readonly Vector2 ReferenceResolution = new Vector2(1920f, 1080f);
 
     private readonly List<GameObject> cardRoots = new List<GameObject>(MaxCardSlots);
@@ -45,9 +58,16 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
     private readonly List<Text> cardStackTexts = new List<Text>(MaxCardSlots);
     private readonly List<Text> cardSummaryTexts = new List<Text>(MaxCardSlots);
     private readonly Dictionary<int, MinimapDot> enemyMinimapDots = new Dictionary<int, MinimapDot>();
+    private readonly Dictionary<int, MinimapDot> statueMinimapDots = new Dictionary<int, MinimapDot>();
+    private readonly Dictionary<int, MinimapDot> chestMinimapDots = new Dictionary<int, MinimapDot>();
     private readonly Dictionary<int, EnemyHealthBar> enemyHealthBars = new Dictionary<int, EnemyHealthBar>();
+    private readonly Dictionary<int, ChestProgressBar> chestProgressBars = new Dictionary<int, ChestProgressBar>();
     private readonly HashSet<int> activeEnemyIds = new HashSet<int>();
+    private readonly HashSet<int> activeStatueIds = new HashSet<int>();
+    private readonly HashSet<int> activeChestIds = new HashSet<int>();
     private readonly List<int> staleEnemyIds = new List<int>();
+    private readonly List<int> staleStatueIds = new List<int>();
+    private readonly List<int> staleChestIds = new List<int>();
 
     private Canvas canvas;
     private Font font;
@@ -60,6 +80,7 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
     private GameObject settlementOverlay;
     private GameObject waterOverlay;
     private GameObject rewindOverlay;
+    private GameObject chestRewardOverlay;
 
     private Text playerNameText;
     private Text hpValueText;
@@ -68,6 +89,7 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
     private Text fireRateText;
     private Text pierceText;
     private Text weaponText;
+    private Text healingStatusText;
     private RectTransform hpBarBackgroundRect;
     private RectTransform hpFillRect;
 
@@ -95,6 +117,8 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
     private Text inventoryCardsText;
     private Text waterBodyText;
     private Text rewindCountdownText;
+    private Text chestRewardTitleText;
+    private Text chestRewardBodyText;
     private Text terrainNameText;
     private Text terrainEffectText;
     private RectTransform minimapArea;
@@ -172,6 +196,7 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
         BuildSettlementOverlay(rootRect);
         BuildWaterOverlay(rootRect);
         BuildRewindOverlay(rootRect);
+        BuildChestRewardOverlay(rootRect);
     }
 
     private void RefreshView()
@@ -199,6 +224,7 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
         fireRateText.text = $"\u5c04\u901f {session.CurrentFireRate:0.0}/\u79d2";
         pierceText.text = $"\u989d\u5916\u7a7f\u900f {session.CurrentExtraPierce}";
         weaponText.text = $"\u6b66\u5668 {GameSelectionConfig.GetWeaponDisplayName(GameSelectionConfig.CurrentWeaponType)}";
+        healingStatusText.text = session.IsPlayerHealingFromStatue ? "\u77f3\u50cf\u5e87\u62a4\u4e2d\uff1a\u6bcf\u79d2\u56de\u590d 5% \u6700\u5927\u751f\u547d" : string.Empty;
         UpdateSmoothFill(hpBarBackgroundRect, hpFillRect, stats != null ? stats.HealthRatio : 0f, ref displayedPlayerHpRatio, ref playerHpBarInitialized);
 
         waveValueText.text = $"\u7b2c {session.CurrentWave} \u6ce2";
@@ -215,10 +241,17 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
 
         SetVisible(pauseOverlay, session.ShowPauseMenu && !session.ShowRewindCountdown);
         SetVisible(upgradeOverlay, session.ShowUpgradeChoices && !session.ShowRewindCountdown);
-        SetVisible(inventoryOverlay, !session.ShowPauseMenu && !session.ShowUpgradeChoices && !session.ShowSettlement && !session.ShowWaterEffectPrompt && !session.ShowRewindCountdown && Input.GetKey(KeyCode.Tab));
+        SetVisible(inventoryOverlay, !session.ShowPauseMenu && !session.ShowUpgradeChoices && !session.ShowSettlement && !session.ShowChestRewardOverlay && !session.ShowWaterEffectPrompt && !session.ShowRewindCountdown && Input.GetKey(KeyCode.Tab));
         SetVisible(settlementOverlay, session.ShowSettlement && !session.ShowRewindCountdown);
+        SetVisible(chestRewardOverlay, session.ShowChestRewardOverlay && !session.ShowRewindCountdown);
         SetVisible(waterOverlay, session.ShowWaterEffectPrompt && !session.ShowRewindCountdown);
         SetVisible(rewindOverlay, session.ShowRewindCountdown);
+        if (session.ShowChestRewardOverlay)
+        {
+            chestRewardTitleText.text = session.CurrentChestRewardTitle;
+            chestRewardBodyText.text = session.CurrentChestRewardDescription;
+        }
+
         if (session.ShowRewindCountdown && rewindCountdownText != null)
         {
             rewindCountdownText.text = session.RewindCountdownValue > 0 ? session.RewindCountdownValue.ToString() : string.Empty;
@@ -299,6 +332,8 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
             AddInventoryBonus(intBonuses, "穿透", info.Card.BonusPierce * stackCount);
             AddInventoryBonus(floatBonuses, "拾取范围", info.Card.BonusPickupRadius * stackCount);
             AddInventoryBonus(intBonuses, "拾取回血", info.Card.BonusHealOnPickup * stackCount);
+            AddInventoryBonus(intBonuses, "弹匣扩容", info.Card.BonusAmmoCapacity * stackCount);
+            AddInventoryBonus(floatBonuses, "换弹加速", info.Card.BonusReloadSpeed * stackCount * 100f);
         }
 
         System.Text.StringBuilder builder = new System.Text.StringBuilder();
@@ -354,6 +389,7 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
         UpdateMinimapPlayerDot(session);
 
         activeEnemyIds.Clear();
+        activeStatueIds.Clear();
         IReadOnlyList<EnemyActor> enemies = session.ActiveEnemies;
         for (int index = 0; index < enemies.Count; index++)
         {
@@ -369,7 +405,37 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
             UpdateEnemyHealthBar(enemy, enemyId);
         }
 
-        CleanupStaleEnemyUi();
+        IReadOnlyList<StoneStatueEffect> statues = StoneStatueEffect.ActiveStatues;
+        for (int index = 0; index < statues.Count; index++)
+        {
+            StoneStatueEffect statue = statues[index];
+            if (statue == null || !statue.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            int statueId = statue.GetInstanceID();
+            activeStatueIds.Add(statueId);
+            UpdateMinimapStatueDot(session, statue, statueId);
+        }
+
+        activeChestIds.Clear();
+        IReadOnlyList<BreakableChest> chests = BreakableChest.ActiveChests;
+        for (int index = 0; index < chests.Count; index++)
+        {
+            BreakableChest chest = chests[index];
+            if (chest == null || chest.IsBroken || !chest.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            int chestId = chest.GetInstanceID();
+            activeChestIds.Add(chestId);
+            UpdateMinimapChestDot(session, chest, chestId);
+            UpdateChestProgressBar(chest, chestId);
+        }
+
+        CleanupStaleWorldUi();
     }
 
     private void RefreshWorldCamera()
@@ -407,6 +473,28 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
         }
     }
 
+    private void UpdateMinimapStatueDot(RoguelikeGameManager session, StoneStatueEffect statue, int statueId)
+    {
+        MinimapDot dot = GetOrCreateStatueDot(statueId);
+        dot.Image.color = StatueDotColor;
+        dot.Rect.anchoredPosition = WorldToMinimapPosition(session, statue.HealCenter);
+        if (!dot.Rect.gameObject.activeSelf)
+        {
+            dot.Rect.gameObject.SetActive(true);
+        }
+    }
+
+    private void UpdateMinimapChestDot(RoguelikeGameManager session, BreakableChest chest, int chestId)
+    {
+        MinimapDot dot = GetOrCreateChestDot(chestId);
+        dot.Image.color = ChestDotColor;
+        dot.Rect.anchoredPosition = WorldToMinimapPosition(session, chest.Position);
+        if (!dot.Rect.gameObject.activeSelf)
+        {
+            dot.Rect.gameObject.SetActive(true);
+        }
+    }
+
     private void UpdateEnemyHealthBar(EnemyActor enemy, int enemyId)
     {
         EnemyHealthBar bar = GetOrCreateEnemyHealthBar(enemyId, enemy.IsElite);
@@ -414,7 +502,34 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
         UpdateSmoothFill(bar.BackgroundRect, bar.FillRect, enemy.HealthRatio, ref bar.DisplayFill);
         bar.ValueText.text = $"{enemy.CurrentHp}/{enemy.MaxHp}";
 
-        bool isVisible = TryGetScreenPosition(enemy.Position + (Vector2.up * enemy.UiHeadOffset), out Vector2 localPoint);
+        Vector2 localPoint = Vector2.zero;
+        bool isVisible = !enemy.IsOccludedByStatue
+            && TryGetScreenPosition(enemy.Position + (Vector2.up * enemy.UiHeadOffset), out localPoint);
+        if (!bar.Root.gameObject.activeSelf && isVisible)
+        {
+            bar.Root.gameObject.SetActive(true);
+        }
+
+        if (!isVisible)
+        {
+            if (bar.Root.gameObject.activeSelf)
+            {
+                bar.Root.gameObject.SetActive(false);
+            }
+
+            return;
+        }
+
+        bar.Root.anchoredPosition = localPoint;
+    }
+
+    private void UpdateChestProgressBar(BreakableChest chest, int chestId)
+    {
+        ChestProgressBar bar = GetOrCreateChestProgressBar(chestId);
+        UpdateSmoothFill(bar.BackgroundRect, bar.FillRect, chest.RemainingRatio, ref bar.DisplayFill);
+        bar.ValueText.text = $"\u5b9d\u7bb1 {chest.RemainingHits}/{chest.MaxHits}";
+
+        bool isVisible = TryGetScreenPosition(chest.Position + (Vector2.up * chest.UiHeadOffset), out Vector2 localPoint);
         if (!bar.Root.gameObject.activeSelf && isVisible)
         {
             bar.Root.gameObject.SetActive(true);
@@ -507,6 +622,40 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
         return dot;
     }
 
+    private MinimapDot GetOrCreateStatueDot(int statueId)
+    {
+        if (statueMinimapDots.TryGetValue(statueId, out MinimapDot dot))
+        {
+            return dot;
+        }
+
+        Image dotImage = CreateDot(minimapArea, "StatueDot_" + statueId, 6f, StatueDotColor);
+        dot = new MinimapDot
+        {
+            Rect = dotImage.rectTransform,
+            Image = dotImage
+        };
+        statueMinimapDots[statueId] = dot;
+        return dot;
+    }
+
+    private MinimapDot GetOrCreateChestDot(int chestId)
+    {
+        if (chestMinimapDots.TryGetValue(chestId, out MinimapDot dot))
+        {
+            return dot;
+        }
+
+        Image dotImage = CreateDot(minimapArea, "ChestDot_" + chestId, 7f, ChestDotColor);
+        dot = new MinimapDot
+        {
+            Rect = dotImage.rectTransform,
+            Image = dotImage
+        };
+        chestMinimapDots[chestId] = dot;
+        return dot;
+    }
+
     private EnemyHealthBar GetOrCreateEnemyHealthBar(int enemyId, bool isElite)
     {
         if (enemyHealthBars.TryGetValue(enemyId, out EnemyHealthBar bar))
@@ -541,9 +690,44 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
         return bar;
     }
 
-    private void CleanupStaleEnemyUi()
+    private ChestProgressBar GetOrCreateChestProgressBar(int chestId)
+    {
+        if (chestProgressBars.TryGetValue(chestId, out ChestProgressBar bar))
+        {
+            return bar;
+        }
+
+        GameObject rootObject = new GameObject("ChestProgressBar_" + chestId, typeof(RectTransform));
+        rootObject.transform.SetParent(enemyBarLayer, false);
+        RectTransform barRoot = rootObject.GetComponent<RectTransform>();
+        barRoot.anchorMin = new Vector2(0.5f, 0.5f);
+        barRoot.anchorMax = new Vector2(0.5f, 0.5f);
+        barRoot.pivot = new Vector2(0.5f, 0.5f);
+        barRoot.sizeDelta = new Vector2(164f, 24f);
+
+        RectTransform backgroundRect = CreateColoredRect(barRoot, "BarBackground", new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(148f, 16f), Vector2.zero, BarBackground);
+        AddOutline(backgroundRect.gameObject, Accent, new Vector2(1f, -1f));
+
+        RectTransform fillRect = CreateSlidingBarFill(backgroundRect, "BarFill", ChestBarColor, backgroundRect.sizeDelta.x);
+        Text valueText = CreateText(barRoot, "ChestValue", 12, FontStyle.Bold, TextAnchor.MiddleCenter, Color.white, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(164f, 24f));
+
+        bar = new ChestProgressBar
+        {
+            Root = barRoot,
+            BackgroundRect = backgroundRect,
+            FillRect = fillRect,
+            ValueText = valueText,
+            DisplayFill = 1f
+        };
+        chestProgressBars[chestId] = bar;
+        return bar;
+    }
+
+    private void CleanupStaleWorldUi()
     {
         staleEnemyIds.Clear();
+        staleStatueIds.Clear();
+        staleChestIds.Clear();
 
         foreach (KeyValuePair<int, MinimapDot> pair in enemyMinimapDots)
         {
@@ -561,9 +745,43 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
             }
         }
 
+        foreach (KeyValuePair<int, MinimapDot> pair in statueMinimapDots)
+        {
+            if (!activeStatueIds.Contains(pair.Key))
+            {
+                staleStatueIds.Add(pair.Key);
+            }
+        }
+
+        foreach (KeyValuePair<int, MinimapDot> pair in chestMinimapDots)
+        {
+            if (!activeChestIds.Contains(pair.Key))
+            {
+                staleChestIds.Add(pair.Key);
+            }
+        }
+
+        foreach (KeyValuePair<int, ChestProgressBar> pair in chestProgressBars)
+        {
+            if (!activeChestIds.Contains(pair.Key))
+            {
+                staleChestIds.Add(pair.Key);
+            }
+        }
+
         for (int index = 0; index < staleEnemyIds.Count; index++)
         {
             ReleaseEnemyUi(staleEnemyIds[index]);
+        }
+
+        for (int index = 0; index < staleStatueIds.Count; index++)
+        {
+            ReleaseStatueUi(staleStatueIds[index]);
+        }
+
+        for (int index = 0; index < staleChestIds.Count; index++)
+        {
+            ReleaseChestUi(staleChestIds[index]);
         }
     }
 
@@ -590,9 +808,45 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
         }
     }
 
+    private void ReleaseStatueUi(int statueId)
+    {
+        if (statueMinimapDots.TryGetValue(statueId, out MinimapDot dot))
+        {
+            if (dot.Rect != null)
+            {
+                Destroy(dot.Rect.gameObject);
+            }
+
+            statueMinimapDots.Remove(statueId);
+        }
+    }
+
+    private void ReleaseChestUi(int chestId)
+    {
+        if (chestMinimapDots.TryGetValue(chestId, out MinimapDot dot))
+        {
+            if (dot.Rect != null)
+            {
+                Destroy(dot.Rect.gameObject);
+            }
+
+            chestMinimapDots.Remove(chestId);
+        }
+
+        if (chestProgressBars.TryGetValue(chestId, out ChestProgressBar bar))
+        {
+            if (bar.Root != null)
+            {
+                Destroy(bar.Root.gameObject);
+            }
+
+            chestProgressBars.Remove(chestId);
+        }
+    }
+
     private void BuildHudPanels(RectTransform root)
     {
-        RectTransform playerPanel = CreatePanel(root, "PlayerPanel", new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(360f, 194f), new Vector2(18f, -18f));
+        RectTransform playerPanel = CreatePanel(root, "PlayerPanel", new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(360f, 220f), new Vector2(18f, -18f));
         playerNameText = CreateText(playerPanel, "PlayerName", 22, FontStyle.Bold, TextAnchor.UpperLeft, Color.white, new Vector2(18f, -14f), new Vector2(324f, 28f));
         CreateBar(playerPanel, new Vector2(18f, -52f), new Vector2(324f, 18f), HpBarColor, out hpBarBackgroundRect, out hpFillRect);
         CreateText(playerPanel, "HpLabel", 14, FontStyle.Normal, TextAnchor.UpperLeft, SoftText, new Vector2(20f, -76f), new Vector2(40f, 22f)).text = "\u751f\u547d";
@@ -602,6 +856,7 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
         fireRateText = CreateText(playerPanel, "FireText", 15, FontStyle.Normal, TextAnchor.UpperLeft, SoftText, new Vector2(20f, -134f), new Vector2(160f, 22f));
         pierceText = CreateText(playerPanel, "PierceText", 15, FontStyle.Normal, TextAnchor.UpperLeft, SoftText, new Vector2(168f, -134f), new Vector2(160f, 22f));
         weaponText = CreateText(playerPanel, "WeaponText", 15, FontStyle.Normal, TextAnchor.UpperLeft, SoftText, new Vector2(20f, -160f), new Vector2(300f, 22f));
+        healingStatusText = CreateText(playerPanel, "HealingStatus", 13, FontStyle.Bold, TextAnchor.UpperLeft, HealStatusColor, new Vector2(20f, -188f), new Vector2(320f, 20f));
 
         RectTransform wavePanel = CreatePanel(root, "WavePanel", new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(250f, 92f), new Vector2(0f, -18f));
         CreateText(wavePanel, "WaveTitle", 16, FontStyle.Bold, TextAnchor.MiddleCenter, Accent, new Vector2(0f, -10f), new Vector2(250f, 18f)).text = "\u5f53\u524d\u6ce2\u6b21";
@@ -620,7 +875,7 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
         expHintText = CreateText(progressPanel, "ExpHint", 13, FontStyle.Normal, TextAnchor.UpperLeft, SoftText, new Vector2(18f, -66f), new Vector2(424f, 18f));
         reloadHintText = CreateText(progressPanel, "ReloadHint", 12, FontStyle.Bold, TextAnchor.UpperLeft, Accent, new Vector2(18f, -84f), new Vector2(424f, 16f));
 
-        RectTransform terrainPanel = CreatePanel(root, "TerrainPanel", new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(360f, 94f), new Vector2(18f, -226f));
+        RectTransform terrainPanel = CreatePanel(root, "TerrainPanel", new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(360f, 94f), new Vector2(18f, -252f));
         CreateText(terrainPanel, "TerrainTitle", 15, FontStyle.Bold, TextAnchor.UpperLeft, Accent, new Vector2(18f, -12f), new Vector2(324f, 18f)).text = "\u5730\u5f62\u589e\u76ca";
         terrainNameText = CreateText(terrainPanel, "TerrainName", 18, FontStyle.Bold, TextAnchor.UpperLeft, Color.white, new Vector2(18f, -38f), new Vector2(324f, 22f));
         terrainEffectText = CreateText(terrainPanel, "TerrainEffect", 13, FontStyle.Normal, TextAnchor.UpperLeft, SoftText, new Vector2(18f, -64f), new Vector2(324f, 24f));
@@ -633,7 +888,7 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
         CreateColoredRect(minimapArea, "HorizontalAxis", new Vector2(0f, 0.5f), new Vector2(1f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, 1f), Vector2.zero, MinimapGridColor);
         CreateColoredRect(minimapArea, "VerticalAxis", new Vector2(0.5f, 0f), new Vector2(0.5f, 1f), new Vector2(0.5f, 0.5f), new Vector2(1f, 0f), Vector2.zero, MinimapGridColor);
         minimapPlayerDot = CreateDot(minimapArea, "PlayerDot", 10f, PlayerDotColor);
-        CreateText(minimapPanel, "MinimapLegend", 12, FontStyle.Normal, TextAnchor.UpperLeft, SoftText, new Vector2(18f, -274f), new Vector2(328f, 14f)).text = "\u7eff\u8272 Player   \u7ea2\u8272\u602a\u7269   \u7d2b\u8272\u7cbe\u82f1";
+        CreateText(minimapPanel, "MinimapLegend", 12, FontStyle.Normal, TextAnchor.UpperLeft, SoftText, new Vector2(18f, -270f), new Vector2(340f, 28f)).text = "\u7eff\u8272\u73a9\u5bb6  \u7ea2\u8272\u602a\u7269  \u7d2b\u8272\u7cbe\u82f1  \u7070\u8272\u77f3\u50cf  \u9ec4\u8272\u5b9d\u7bb1";
 
         enemyBarLayer = CreateStretchRect(root, "EnemyBarLayer");
     }
@@ -812,6 +1067,17 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
         AddOutline(rewindCountdownText.gameObject, new Color(0f, 0f, 0f, 0.55f), new Vector2(2f, -2f));
         CreateText(overlayRect, "RewindHint", 18, FontStyle.Normal, TextAnchor.MiddleCenter, new Color(0.72f, 0.72f, 0.72f, 0.9f), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -150f), new Vector2(620f, 24f)).text = "\u5012\u8ba1\u65f6\u7ed3\u675f\u540e\u5c06\u81ea\u52a8\u56de\u5230\u6700\u8fd1\u5feb\u7167";
         rewindOverlay.SetActive(false);
+    }
+
+    private void BuildChestRewardOverlay(RectTransform root)
+    {
+        chestRewardOverlay = CreateOverlay(root, "ChestRewardOverlay");
+        RectTransform dialog = CreatePanel(chestRewardOverlay.transform as RectTransform, "ChestRewardDialog", new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(680f, 360f), Vector2.zero);
+        CreateText(dialog, "ChestRewardHeader", 16, FontStyle.Bold, TextAnchor.MiddleCenter, Accent, new Vector2(0f, -20f), new Vector2(520f, 18f)).text = "\u5b9d\u7bb1\u5df2\u51fb\u788e";
+        chestRewardTitleText = CreateText(dialog, "ChestRewardTitle", 30, FontStyle.Bold, TextAnchor.MiddleCenter, Color.white, new Vector2(0f, -58f), new Vector2(560f, 30f));
+        chestRewardBodyText = CreateText(dialog, "ChestRewardBody", 19, FontStyle.Normal, TextAnchor.UpperLeft, SoftText, new Vector2(42f, -108f), new Vector2(596f, 142f));
+        CreateText(dialog, "ChestRewardHint", 16, FontStyle.Bold, TextAnchor.MiddleCenter, HealStatusColor, new Vector2(0f, -304f), new Vector2(420f, 24f)).text = "\u6309 B \u952e\u5173\u95ed\u7a97\u53e3\u5e76\u7ee7\u7eed";
+        chestRewardOverlay.SetActive(false);
     }
 
     private RectTransform CreatePanel(Transform parent, string name, Vector2 anchorMin, Vector2 anchorMax, Vector2 pivot, Vector2 size, Vector2 anchoredPosition)
@@ -1100,6 +1366,8 @@ public sealed class RoguelikeHudCanvas : MonoBehaviour
         AppendBonus(builder, card.BonusPierce, "\u7a7f\u900f");
         AppendBonus(builder, card.BonusPickupRadius, "\u62fe\u53d6\u8303\u56f4");
         AppendBonus(builder, card.BonusHealOnPickup, "\u62fe\u53d6\u56de\u8840");
+        AppendBonus(builder, card.BonusAmmoCapacity, "\u5f39\u530f\u6269\u5bb9");
+        AppendBonus(builder, card.BonusReloadSpeed * 100f, "\u6362\u5f39\u52a0\u901f%");
         return builder.Length == 0 ? "\u5f53\u524d\u6ca1\u6709\u989d\u5916\u6548\u679c\u3002" : builder.ToString();
     }
 
