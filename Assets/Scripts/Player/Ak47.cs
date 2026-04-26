@@ -3,6 +3,8 @@ using UnityEngine;
 
 public class Ak47 : MonoBehaviour
 {
+    private const int ForegroundSortingOffset = 1;
+
     public GameObject bullet;
     public Transform muzzleTransform;
     public Camera mainCamera;
@@ -106,7 +108,7 @@ public class Ak47 : MonoBehaviour
         }
 
         spriteRenderer.sortingLayerID = targetRenderer.sortingLayerID;
-        spriteRenderer.sortingOrder = targetRenderer.sortingOrder;
+        spriteRenderer.sortingOrder = targetRenderer.sortingOrder + ForegroundSortingOffset;
     }
 
     private void UpdateOcclusionVisibility()

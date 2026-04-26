@@ -276,6 +276,16 @@ public sealed class RoguelikeGameManager : MonoBehaviour
             && point.y <= maxY - safePaddingY;
     }
 
+    public Vector3 ClampPositionToMapBounds(Vector3 position, float padding = 0f)
+    {
+        return ClampToPlayableMapBounds(position, new Vector2(padding, padding));
+    }
+
+    public Vector3 ClampPositionToMapBounds(Vector3 position, Vector2 padding)
+    {
+        return ClampToPlayableMapBounds(position, padding);
+    }
+
     public int GetCardStack(string cardKey)
     {
         return cardStacks.TryGetValue(cardKey, out int stackCount) ? stackCount : 0;
@@ -2272,14 +2282,19 @@ public sealed class RoguelikeGameManager : MonoBehaviour
 
     private Vector3 ClampToPlayableMapBounds(Vector3 position, float padding = 0f)
     {
+        return ClampToPlayableMapBounds(position, new Vector2(padding, padding));
+    }
+
+    private Vector3 ClampToPlayableMapBounds(Vector3 position, Vector2 padding)
+    {
         if (!TryGetPlayableMapBounds(out float minX, out float maxX, out float minY, out float maxY))
         {
             position.z = 0f;
             return position;
         }
 
-        float safePaddingX = Mathf.Min(Mathf.Max(0f, padding), Mathf.Max(0f, (maxX - minX) * 0.5f));
-        float safePaddingY = Mathf.Min(Mathf.Max(0f, padding), Mathf.Max(0f, (maxY - minY) * 0.5f));
+        float safePaddingX = Mathf.Min(Mathf.Max(0f, padding.x), Mathf.Max(0f, (maxX - minX) * 0.5f));
+        float safePaddingY = Mathf.Min(Mathf.Max(0f, padding.y), Mathf.Max(0f, (maxY - minY) * 0.5f));
         position.x = Mathf.Clamp(position.x, minX + safePaddingX, maxX - safePaddingX);
         position.y = Mathf.Clamp(position.y, minY + safePaddingY, maxY - safePaddingY);
         position.z = 0f;

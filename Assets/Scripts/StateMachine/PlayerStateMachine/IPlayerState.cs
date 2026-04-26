@@ -67,13 +67,13 @@ public abstract class IPlayerState:IState
     private Vector2 ResolveMovement(Vector2 currentPosition, Vector2 delta)
     {
         Vector2 resolved = currentPosition;
-        Vector2 xTarget = resolved + new Vector2(delta.x, 0f);
+        Vector2 xTarget = ClampToPlayableMapBounds(resolved + new Vector2(delta.x, 0f));
         if (!IsBlockedAt(xTarget))
         {
             resolved = xTarget;
         }
 
-        Vector2 yTarget = resolved + new Vector2(0f, delta.y);
+        Vector2 yTarget = ClampToPlayableMapBounds(resolved + new Vector2(0f, delta.y));
         if (!IsBlockedAt(yTarget))
         {
             resolved = yTarget;
@@ -84,6 +84,11 @@ public abstract class IPlayerState:IState
 
     private bool IsBlockedAt(Vector2 rootPosition)
     {
+        if (!IsInsidePlayableMapBounds(rootPosition))
+        {
+            return true;
+        }
+
         Collider2D collider = GetMovementCollider();
         if (collider == null)
         {
@@ -116,6 +121,41 @@ public abstract class IPlayerState:IState
         }
 
         return false;
+    }
+
+    private Vector2 ClampToPlayableMapBounds(Vector2 rootPosition)
+    {
+        RoguelikeGameManager manager = RoguelikeGameManager.Instance;
+        if (manager == null)
+        {
+            return rootPosition;
+        }
+
+        Vector2 movementPadding = GetMovementPadding();
+        return manager.ClampPositionToMapBounds(rootPosition, movementPadding);
+    }
+
+    private bool IsInsidePlayableMapBounds(Vector2 rootPosition)
+    {
+        RoguelikeGameManager manager = RoguelikeGameManager.Instance;
+        if (manager == null)
+        {
+            return true;
+        }
+
+        Vector2 clampedPosition = manager.ClampPositionToMapBounds(rootPosition, GetMovementPadding());
+        return (clampedPosition - rootPosition).sqrMagnitude <= 0.0001f;
+    }
+
+    private Vector2 GetMovementPadding()
+    {
+        Collider2D collider = GetMovementCollider();
+        if (collider == null)
+        {
+            return Vector2.zero;
+        }
+
+        return collider.bounds.extents * 0.88f;
     }
 
     private Collider2D GetMovementCollider()
