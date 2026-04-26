@@ -861,7 +861,7 @@ public sealed class RoguelikeGameManager : MonoBehaviour
 
         PowerCardData card = currentCardChoices[cardIndex];
         int currentStack = cardStacks.TryGetValue(card.CardKey, out int stackValue) ? stackValue : 0;
-        if (currentStack < card.MaxStacks)
+        if (!HasReachedCardStackLimit(card, currentStack))
         {
             cardStacks[card.CardKey] = currentStack + 1;
             RecalculateCardBonuses();
@@ -1598,7 +1598,7 @@ public sealed class RoguelikeGameManager : MonoBehaviour
         {
             PowerCardData card = allCards[index];
             int stackCount = cardStacks.TryGetValue(card.CardKey, out int value) ? value : 0;
-            if (stackCount >= card.MaxStacks || IsPowerCardAtGlobalCap(card))
+            if (HasReachedCardStackLimit(card, stackCount) || IsPowerCardAtGlobalCap(card))
             {
                 continue;
             }
@@ -1692,6 +1692,11 @@ public sealed class RoguelikeGameManager : MonoBehaviour
 
         int additionalVolleyCount = sessionBonuses.BonusProjectileCount + sessionBonuses.BonusVolleyCount;
         return additionalVolleyCount >= MaxAdditionalVolleyCount;
+    }
+
+    private static bool HasReachedCardStackLimit(PowerCardData card, int currentStack)
+    {
+        return card != null && card.HasStackLimit && currentStack >= card.MaxStacks;
     }
 
     private void ApplyBonusesToPlayer()

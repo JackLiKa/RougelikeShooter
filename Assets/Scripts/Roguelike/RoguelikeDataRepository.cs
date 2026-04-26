@@ -67,6 +67,8 @@ public sealed class PowerCardData
     public int BonusHealOnPickup;
     public int BonusAmmoCapacity;
     public float BonusReloadSpeed;
+
+    public bool HasStackLimit => MaxStacks > 0;
 }
 
 [Serializable]
@@ -718,7 +720,7 @@ public static class RoguelikeDataRepository
                 Title = GetString(row, "Title", cardKey),
                 Description = GetString(row, "Description", string.Empty),
                 Weight = Mathf.Max(1, GetInt(row, "Weight", 1)),
-                MaxStacks = Mathf.Max(1, GetInt(row, "MaxStacks", 1)),
+                MaxStacks = NormalizePowerCardMaxStacks(cardKey, GetInt(row, "MaxStacks", 1)),
                 BonusHp = GetInt(row, "BonusHp", 0),
                 BonusAttack = GetInt(row, "BonusAttack", 0),
                 BonusMoveSpeed = GetFloat(row, "BonusMoveSpeed", 0f),
@@ -743,7 +745,7 @@ public static class RoguelikeDataRepository
                 Title = "钢铁之心",
                 Description = "最大生命值 +25",
                 Weight = 10,
-                MaxStacks = 5,
+                MaxStacks = 0,
                 BonusHp = 25
             });
             cachedPowerCards.Add(new PowerCardData
@@ -752,7 +754,7 @@ public static class RoguelikeDataRepository
                 Title = "重装弹头",
                 Description = "攻击力 +4",
                 Weight = 10,
-                MaxStacks = 5,
+                MaxStacks = 0,
                 BonusAttack = 4
             });
             cachedPowerCards.Add(new PowerCardData
@@ -761,7 +763,7 @@ public static class RoguelikeDataRepository
                 Title = "高速扳机",
                 Description = "射速 +0.6/秒",
                 Weight = 8,
-                MaxStacks = 6,
+                MaxStacks = 0,
                 BonusShootRate = 0.6f
             });
         }
@@ -805,10 +807,27 @@ public static class RoguelikeDataRepository
             Title = title,
             Description = description,
             Weight = Mathf.Max(1, weight),
-            MaxStacks = Mathf.Max(1, maxStacks)
+            MaxStacks = NormalizePowerCardMaxStacks(cardKey, maxStacks)
         };
         configure?.Invoke(card);
         cachedPowerCards.Add(card);
+    }
+
+    // These progression cards are intended to remain available for the entire run.
+    private static int NormalizePowerCardMaxStacks(string cardKey, int configuredMaxStacks)
+    {
+        switch (cardKey?.Trim().ToLowerInvariant())
+        {
+            case "hp_boost":
+            case "attack_boost":
+            case "speed_boost":
+            case "rapid_trigger":
+            case "pierce":
+            case "magnet":
+                return 0;
+            default:
+                return Mathf.Max(0, configuredMaxStacks);
+        }
     }
 
     private static List<Dictionary<string, string>> ReadCsvRows(string fileName)
